@@ -133,6 +133,25 @@ class EnglishBookNLP:
 
             pipes = self.config.pipeline.split(",")
 
+            self.doEntities = self.doCoref = self.doQuoteAttrib = self.doSS = (
+                self.doEvent
+            ) = False
+
+            for pipe in pipes:
+                if pipe not in valid_keys:
+                    self.logger.info("unknown pipe: %s" % pipe)
+                    sys.exit(1)
+                if pipe == "entity":
+                    self.doEntities = True
+                elif pipe == "event":
+                    self.doEvent = True
+                elif pipe == "coref":
+                    self.doCoref = True
+                elif pipe == "supersense":
+                    self.doSS = True
+                elif pipe == "quote":
+                    self.doQuoteAttrib = True
+
             self.gender_cats = [
                 ["he", "him", "his"],
                 ["she", "her"],
@@ -191,32 +210,35 @@ class EnglishBookNLP:
                     "speaker_google_bert_uncased_L-8_H-256_A-4-v1.0.1.model"
                 )
 
-                self.entityPath = os.path.join(modelPath, entityName)
-                if not Path(self.entityPath).is_file():
-                    self.logger.info("downloading %s" % entityName)
-                    urllib.request.urlretrieve(
-                        "http://people.ischool.berkeley.edu/~dbamman/booknlp_models/%s"
-                        % entityName,
-                        self.entityPath,
-                    )
+                if self.doEntities:
+                    self.entityPath = os.path.join(modelPath, entityName)
+                    if not Path(self.entityPath).is_file():
+                        self.logger.info("downloading %s" % entityName)
+                        urllib.request.urlretrieve(
+                            "http://people.ischool.berkeley.edu/~dbamman/booknlp_models/%s"
+                            % entityName,
+                            self.entityPath,
+                        )
 
-                self.coref_model = os.path.join(modelPath, corefName)
-                if not Path(self.coref_model).is_file():
-                    self.logger.info("downloading %s" % corefName)
-                    urllib.request.urlretrieve(
-                        "http://people.ischool.berkeley.edu/~dbamman/booknlp_models/%s"
-                        % corefName,
-                        self.coref_model,
-                    )
+                if self.doCoref:
+                    self.coref_model = os.path.join(modelPath, corefName)
+                    if not Path(self.coref_model).is_file():
+                        self.logger.info("downloading %s" % corefName)
+                        urllib.request.urlretrieve(
+                            "http://people.ischool.berkeley.edu/~dbamman/booknlp_models/%s"
+                            % corefName,
+                            self.coref_model,
+                        )
 
-                self.quoteAttribModel = os.path.join(modelPath, quoteAttribName)
-                if not Path(self.quoteAttribModel).is_file():
-                    self.logger.info("downloading %s" % quoteAttribName)
-                    urllib.request.urlretrieve(
-                        "http://people.ischool.berkeley.edu/~dbamman/booknlp_models/%s"
-                        % quoteAttribName,
-                        self.quoteAttribModel,
-                    )
+                if self.doQuoteAttrib:
+                    self.quoteAttribModel = os.path.join(modelPath, quoteAttribName)
+                    if not Path(self.quoteAttribModel).is_file():
+                        self.logger.info("downloading %s" % quoteAttribName)
+                        urllib.request.urlretrieve(
+                            "http://people.ischool.berkeley.edu/~dbamman/booknlp_models/%s"
+                            % quoteAttribName,
+                            self.quoteAttribModel,
+                        )
 
             elif self.config.model == "custom":
                 assert (
@@ -227,25 +249,6 @@ class EnglishBookNLP:
                 self.entityPath = self.config.entity_model_path
                 self.coref_model = self.config.coref_model_path
                 self.quoteAttribModel = self.config.quote_attribution_model_path
-
-            self.doEntities = self.doCoref = self.doQuoteAttrib = self.doSS = (
-                self.doEvent
-            ) = False
-
-            for pipe in pipes:
-                if pipe not in valid_keys:
-                    self.logger.info("unknown pipe: %s" % pipe)
-                    sys.exit(1)
-                if pipe == "entity":
-                    self.doEntities = True
-                elif pipe == "event":
-                    self.doEvent = True
-                elif pipe == "coref":
-                    self.doCoref = True
-                elif pipe == "supersense":
-                    self.doSS = True
-                elif pipe == "quote":
-                    self.doQuoteAttrib = True
 
             tagsetPath = "data/entity_cat.tagset"
             tagsetPath = pkg_resources.resource_filename(__name__, tagsetPath)
