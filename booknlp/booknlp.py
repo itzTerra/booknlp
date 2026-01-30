@@ -2,7 +2,7 @@ import sys
 import argparse
 from typing import Any, Dict, Optional
 from transformers import logging
-from booknlp.english.english_booknlp import EnglishBookNLP, EnglishBookNLPConfig, Token
+from booknlp.english.english_booknlp import EnglishBookNLP, EnglishBookNLPConfig
 from booknlp.common.core import BookNLPResult
 
 logging.set_verbosity_error()
@@ -57,7 +57,7 @@ def proc():
         sys.exit(1)
 
     model_params = {
-        "pipeline": "entity,quote,supersense,event,coref",
+        "pipeline": "entity,supersense,event",
         "model": "small",
     }
 

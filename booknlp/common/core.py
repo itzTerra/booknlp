@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from booknlp.common.pipelines import Token
 
 
@@ -10,8 +10,4 @@ class BookNLPResult:
     noun_chunks: List[Any]
     entities: List[Dict[str, Any]]
     supersense: List[Any]
-    quotes: List[Any]
-    attributed_quotes: List[Optional[int]]
-    coref: Optional[List[int]]
-    characters: List[Dict[str, Any]]
     timing: Dict[str, Any]
