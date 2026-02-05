@@ -1,0 +1,137 @@
+import { SpaCyContext, SpaCyToken, BookNLPConfig, ValidationError } from 'types';
+
+export class SpacyValidationError extends Error {
+  constructor(
+    public errors: Array<{ field: string; message: string }>,
+  ) {
+    super(`Validation failed: ${errors.map((e) => `${e.field}: ${e.message}`).join('; ')}`);
+    this.name = 'SpacyValidationError';
+  }
+}
+
+export function validateSpaCyContext(context: SpaCyContext): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (!context.tokens || !Array.isArray(context.tokens)) {
+    errors.push({ field: 'tokens', message: 'tokens must be a non-empty array' });
+  } else if (context.tokens.length === 0) {
+    errors.push({ field: 'tokens', message: 'tokens array is empty' });
+  }
+
+  if (!context.sentences || !Array.isArray(context.sentences)) {
+    errors.push({ field: 'sentences', message: 'sentences must be a non-empty array' });
+  } else if (context.sentences.length === 0) {
+    errors.push({ field: 'sentences', message: 'sentences array is empty' });
+  }
+
+  if (context.tokens && context.sentences) {
+    const tokenCount = context.tokens.length;
+    for (let i = 0; i < context.sentences.length; i++) {
+      const sent = context.sentences[i];
+      if (sent.start < 0 || sent.end > tokenCount || sent.start >= sent.end) {
+        errors.push({
+          field: `sentences[${i}]`,
+          message: `invalid sentence bounds: start=${sent.start}, end=${sent.end}, expected 0-${tokenCount}`,
+        });
+      }
+    }
+  }
+
+  if (context.tokens) {
+    for (let i = 0; i < context.tokens.length; i++) {
+      const tokenErrors = validateSpaCyToken(context.tokens[i], i);
+      errors.push(...tokenErrors);
+    }
+  }
+
+  return errors;
+}
+
+export function validateSpaCyToken(token: SpaCyToken, index: number): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const prefix = `tokens[${index}]`;
+
+  if (typeof token.text !== 'string' || token.text.length === 0) {
+    errors.push({ field: `${prefix}.text`, message: 'text must be a non-empty string' });
+  }
+
+  if (typeof token.startByte !== 'number' || token.startByte < 0) {
+    errors.push({ field: `${prefix}.startByte`, message: 'startByte must be a non-negative number' });
+  }
+
+  if (typeof token.endByte !== 'number' || token.endByte <= token.startByte) {
+    errors.push({ field: `${prefix}.endByte`, message: 'endByte must be greater than startByte' });
+  }
+
+  if (typeof token.pos !== 'string' || token.pos.length === 0) {
+    errors.push({ field: `${prefix}.pos`, message: 'pos must be a non-empty string' });
+  }
+
+  if (typeof token.lemma !== 'string' || token.lemma.length === 0) {
+    errors.push({ field: `${prefix}.lemma`, message: 'lemma must be a non-empty string' });
+  }
+
+  if (typeof token.deprel !== 'string' || token.deprel.length === 0) {
+    errors.push({ field: `${prefix}.deprel`, message: 'deprel must be a non-empty string' });
+  }
+
+  if (typeof token.dephead !== 'number') {
+    errors.push({ field: `${prefix}.dephead`, message: 'dephead must be a number' });
+  }
+
+  if (typeof token.sentenceId !== 'number' || token.sentenceId < 0) {
+    errors.push({ field: `${prefix}.sentenceId`, message: 'sentenceId must be a non-negative number' });
+  }
+
+  if (typeof token.withinSentenceId !== 'number' || token.withinSentenceId < 0) {
+    errors.push({
+      field: `${prefix}.withinSentenceId`,
+      message: 'withinSentenceId must be a non-negative number',
+    });
+  }
+
+  if (typeof token.morph !== 'object' || token.morph === null) {
+    errors.push({ field: `${prefix}.morph`, message: 'morph must be a non-null object' });
+  }
+
+  if (typeof token.likeNum !== 'boolean') {
+    errors.push({ field: `${prefix}.likeNum`, message: 'likeNum must be a boolean' });
+  }
+
+  if (typeof token.isStop !== 'boolean') {
+    errors.push({ field: `${prefix}.isStop`, message: 'isStop must be a boolean' });
+  }
+
+  return errors;
+}
+
+export function validateBookNLPConfig(config: BookNLPConfig): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  const validTasks = ['entity', 'supersense', 'event'];
+  const rawPipeline = config.pipeline;
+  const pipelineItems = Array.isArray(rawPipeline)
+    ? rawPipeline
+    : rawPipeline.split(',').map((task) => task.trim()).filter(Boolean);
+
+  if (pipelineItems.length === 0) {
+    errors.push({ field: 'pipeline', message: 'pipeline must be a non-empty string or array' });
+  }
+
+  for (let i = 0; i < pipelineItems.length; i++) {
+    if (!validTasks.includes(pipelineItems[i])) {
+      errors.push({
+        field: `pipeline[${i}]`,
+        message: `invalid pipeline task "${pipelineItems[i]}". Must be one of: ${validTasks.join(', ')}`,
+      });
+    }
+  }
+
+  return errors;
+}
+
+export function throwIfValidationErrors(errors: ValidationError[]): void {
+  if (errors.length > 0) {
+    throw new SpacyValidationError(errors);
+  }
+}

@@ -1,6 +1,6 @@
 from booknlp.booknlp import BookNLP
 
-model_params = {"pipeline": "entity,supersense,event", "model": "big"}
+model_params = {"pipeline": "entity,supersense,event", "model": "small"}
 
 booknlp = BookNLP("en", model_params)
 
