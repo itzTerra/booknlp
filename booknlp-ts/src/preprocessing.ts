@@ -207,7 +207,10 @@ export class Tokenizer {
       );
     }
 
-    return Math.max(1, ids.length);
+    // Match Python behavior: return actual length, not Math.max(1, length)
+    // Python uses len(toks) which can be 0 for some edge cases
+    // Reference: booknlp/english/entity_tagger.py:116-126
+    return ids.length;
   }
 
   private isCapitalized(text: string): boolean {

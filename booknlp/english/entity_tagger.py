@@ -105,6 +105,7 @@ class LitBankEntityTagger:
         lastSid = None
 
         length = 0
+        split_count = 0
 
         for tok in toks:
             wptok = tok.text
@@ -118,6 +119,7 @@ class LitBankEntityTagger:
             ):
                 sents.append(sent)
                 o_sents.append(o_sent)
+                split_count += 1
                 sent = []
                 o_sent = []
                 length = 0
@@ -130,6 +132,9 @@ class LitBankEntityTagger:
 
         sents.append(sent)
         o_sents.append(o_sent)
+        # Debug: sents should equal split_count + 1 (splits + final append)
+        # print(f"DEBUG PY: Created {len(sents)} sentence chunks after {split_count} splits")
+        first_phase_count = len(sents)
 
         sentences = []
         o_sentences = []
@@ -139,6 +144,9 @@ class LitBankEntityTagger:
         o_sent = []
 
         cur_length = 0
+        group_chunk_count = 0
+        group_lengths = []
+        group_chunk_counts = []
 
         for idx, sent in enumerate(sents):
             sent_len = 0
@@ -149,11 +157,15 @@ class LitBankEntityTagger:
                 sentence.append(["[SEP]"])
                 sentences.append(sentence)
                 o_sentences.append(o_sent)
+                group_lengths.append(cur_length)
+                group_chunk_counts.append(group_chunk_count)
                 sentence = [["[CLS]"]]
                 o_sent = []
                 cur_length = 0
+                group_chunk_count = 0
 
             cur_length += sent_len
+            group_chunk_count += 1
 
             sentence.extend(sent)
             o_sent.extend(o_sents[idx])
@@ -162,8 +174,15 @@ class LitBankEntityTagger:
             sentence.append(["[SEP]"])
             o_sentences.append(o_sent)
             sentences.append(sentence)
+            group_lengths.append(cur_length)
+            group_chunk_counts.append(group_chunk_count)
 
         sents = o_sentences
+
+        # Debug: Track sentence grouping before batching
+        sentence_groups_count = len(sentences)
+        first_phase_chunks = first_phase_count
+        second_phase_groups = sentence_groups_count
 
         (
             batched_sents,
@@ -245,6 +264,13 @@ class LitBankEntityTagger:
                 return_vals["events"] = events
 
         debug_info["batches_count"] = len(batched_sents)
+        debug_info["first_phase_chunks"] = first_phase_chunks
+        debug_info["second_phase_groups"] = second_phase_groups
+        debug_info["sentence_chunks_count"] = first_phase_chunks
+        debug_info["sentence_groups_before_sort"] = sentence_groups_count
+        debug_info["ordered_sentences_count"] = len(ordering)
+        debug_info["second_phase_group_lengths"] = group_lengths
+        debug_info["second_phase_group_chunk_counts"] = group_chunk_counts
         debug_info["raw_batch_sample"] = {
             "batched_sents_count": len(batched_sents[:1]),
             "entity_predictions_sample": [

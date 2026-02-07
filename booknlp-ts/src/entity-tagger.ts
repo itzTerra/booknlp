@@ -206,7 +206,12 @@ export class EntityTagger {
       throw new Error('SpaCy token count does not match BookNLP token count after filtering.');
     }
 
-    const sentenceBatches = this.createSentenceBatches(tokens, filteredSpaCyTokens);
+    const {
+      batches: sentenceBatches,
+      firstPhaseCount: firstPhaseChunks,
+      secondPhaseGroupLengths,
+      secondPhaseGroupChunkCounts,
+    } = this.createSentenceBatches(tokens, filteredSpaCyTokens);
 
     // Match Python: get_batches sorts by BERT token length before batching.
     // Reference: booknlp/common/layered_reader.py:107-140
@@ -216,6 +221,11 @@ export class EntityTagger {
         length: this.estimateSentenceLength(batch.spaCyTokens),
       }))
       .sort((a, b) => a.length - b.length);
+
+    // Debug: Track sentence grouping (corresponds to Python's len(sentences))
+    const preGroupCount = sentenceBatches.length;
+    const postSortCount = orderedSentences.length;
+    const secondPhaseGroups = sentenceBatches.length;
 
     const allEntityAnnotations: EntityAnnotation[] = [];
     const allSupersenseAnnotations: SupersenseAnnotation[] = [];
@@ -258,8 +268,18 @@ export class EntityTagger {
       batchIdx += batchSizeUsed;
     }
 
+    // Debug info to match Python's debug output structure
+    // Python's batches_count is len(batched_sents), which is the number of inference batches
+    // Reference: booknlp/english/entity_tagger.py:256
     const debugInfo: Record<string, any> = {
       batches_count: batchCount,
+      first_phase_chunks: firstPhaseChunks,
+      second_phase_groups: secondPhaseGroups,
+      sentence_groups_before_sort: preGroupCount,
+      sentence_chunks_count: firstPhaseChunks,  // First phase chunks, not second phase groups
+      ordered_sentences_count: postSortCount,
+      second_phase_group_lengths: secondPhaseGroupLengths,
+      second_phase_group_chunk_counts: secondPhaseGroupChunkCounts,
       extracted_entities_count: allEntityAnnotations.length,
       extracted_supersense_count: allSupersenseAnnotations.length,
     };
@@ -275,7 +295,12 @@ export class EntityTagger {
   private createSentenceBatches(
     tokens: Token[],
     spaCyTokens: SpaCyToken[]
-  ): Array<{ tokens: Token[]; spaCyTokens: SpaCyToken[] }> {
+  ): {
+    batches: Array<{ tokens: Token[]; spaCyTokens: SpaCyToken[] }>;
+    firstPhaseCount: number;
+    secondPhaseGroupLengths: number[];
+    secondPhaseGroupChunkCounts: number[];
+  } {
     const maxSequenceLength = 500;
     const sentenceChunks: Array<{ tokens: Token[]; spaCyTokens: SpaCyToken[]; length: number }> = [];
 
@@ -283,6 +308,7 @@ export class EntityTagger {
     let currentSentenceSpaCy: SpaCyToken[] = [];
     let currentLength = 0;
     let lastSentenceId = -1;
+    let splitCount = 0;
 
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i];
@@ -298,6 +324,7 @@ export class EntityTagger {
           spaCyTokens: currentSentenceSpaCy,
           length: currentLength,
         });
+        splitCount++;
         currentSentenceTokens = [];
         currentSentenceSpaCy = [];
         currentLength = 0;
@@ -305,7 +332,7 @@ export class EntityTagger {
 
       currentSentenceTokens.push(token);
       currentSentenceSpaCy.push(spaCyToken);
-      currentLength += tokenLength;
+      currentLength = Math.floor(currentLength + tokenLength);  // Ensure integer arithmetic
       lastSentenceId = token.sentenceId;
     }
 
@@ -313,29 +340,54 @@ export class EntityTagger {
       sentenceChunks.push({
         tokens: currentSentenceTokens,
         spaCyTokens: currentSentenceSpaCy,
-        length: currentLength,
+        length: Math.floor(currentLength),  // Ensure integer
       });
     }
+    // Debug: sentenceChunks.length should equal splitCount + 1 (splits + final append)
+    // console.log(`DEBUG TS: Created ${sentenceChunks.length} sentence chunks after ${splitCount} splits`);
+    const firstPhaseCount = sentenceChunks.length;
 
     const batches: Array<{ tokens: Token[]; spaCyTokens: SpaCyToken[] }> = [];
     let combinedTokens: Token[] = [];
     let combinedSpaCy: SpaCyToken[] = [];
     let combinedLength = 0;
+    let groupChunkCount = 0;
+    const secondPhaseGroupLengths: number[] = [];
+    const secondPhaseGroupChunkCounts: number[] = [];
 
     for (const chunk of sentenceChunks) {
-      if (combinedLength + chunk.length >= maxSequenceLength && combinedTokens.length > 0) {
-        batches.push({
-          tokens: combinedTokens,
-          spaCyTokens: combinedSpaCy,
-        });
+      // Recalculate chunk length to match Python's approach in phase 2
+      // Python iterates through stored tokens and counts them fresh
+      // Reference: booknlp/english/entity_tagger.py:151-153
+      const chunkLength = this.calculateChunkWordpieceLength(chunk.spaCyTokens);
+
+      // Match Python: split when adding chunk would exceed limit, regardless of current batch state.
+      // When the first chunk already exceeds the limit, Python emits an empty [CLS]/[SEP] group.
+      // Reference: booknlp/english/entity_tagger.py:147-161
+      if (combinedLength + chunkLength >= maxSequenceLength) {
+        if (combinedTokens.length > 0) {
+          batches.push({
+            tokens: combinedTokens,
+            spaCyTokens: combinedSpaCy,
+          });
+        } else {
+          batches.push({
+            tokens: [],
+            spaCyTokens: [],
+          });
+        }
+        secondPhaseGroupLengths.push(combinedLength);
+        secondPhaseGroupChunkCounts.push(groupChunkCount);
         combinedTokens = [];
         combinedSpaCy = [];
         combinedLength = 0;
+        groupChunkCount = 0;
       }
 
       combinedTokens.push(...chunk.tokens);
       combinedSpaCy.push(...chunk.spaCyTokens);
-      combinedLength += chunk.length;
+      combinedLength += chunkLength;  // Use recalculated length
+      groupChunkCount += 1;
     }
 
     if (combinedTokens.length > 0) {
@@ -343,9 +395,16 @@ export class EntityTagger {
         tokens: combinedTokens,
         spaCyTokens: combinedSpaCy,
       });
+      secondPhaseGroupLengths.push(combinedLength);
+      secondPhaseGroupChunkCounts.push(groupChunkCount);
     }
 
-    return batches;
+    return {
+      batches,
+      firstPhaseCount,
+      secondPhaseGroupLengths,
+      secondPhaseGroupChunkCounts,
+    };
   }
 
   private estimateTokenLength(token: SpaCyToken): number {
@@ -355,6 +414,17 @@ export class EntityTagger {
   private estimateSentenceLength(spaCyTokens: SpaCyToken[]): number {
     const tokenization = this.tokenizer.tokenizeTokens(spaCyTokens);
     return tokenization.tokenIds.length;
+  }
+
+  private calculateChunkWordpieceLength(spaCyTokens: SpaCyToken[]): number {
+    // Match Python phase 2 logic: iterate through tokens and sum wordpiece counts
+    // Python: for toks in sent: sent_len += len(toks)
+    // Reference: booknlp/english/entity_tagger.py:151-153
+    let totalLength = 0;
+    for (const token of spaCyTokens) {
+      totalLength += this.estimateTokenLength(token);
+    }
+    return totalLength;
   }
 
   private async processSentenceBatch(
