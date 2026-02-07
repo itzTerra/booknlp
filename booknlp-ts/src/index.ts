@@ -1,5 +1,5 @@
 import { SpaCyContext, BookNLPConfig, BookNLPResult } from 'types';
-import { BookNLPPipeline, createPipeline } from 'english-booknlp';
+import { EnglishBookNLP, createPipeline } from 'english-booknlp';
 
 /**
  * BookNLP TypeScript implementation for browser environment.
@@ -20,7 +20,7 @@ import { BookNLPPipeline, createPipeline } from 'english-booknlp';
  * All linguistic preprocessing must be done externally.
  */
 export class BookNLP {
-  private pipeline: BookNLPPipeline | null = null;
+  private pipeline: EnglishBookNLP | null = null;
 
   async initialize(config: BookNLPConfig): Promise<void> {
     this.pipeline = await createPipeline(config);
@@ -38,7 +38,6 @@ export class BookNLP {
 export * from 'types';
 export * from 'validation';
 export * from 'preprocessing';
-export * from 'batch-processor';
 export * from 'tagger-controller';
 export * from 'entity-tagger';
 export * from 'english-booknlp';

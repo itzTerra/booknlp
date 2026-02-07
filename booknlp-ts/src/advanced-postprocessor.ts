@@ -404,19 +404,28 @@ export class AdvancedPostProcessor {
    * - Layer 2: Medium-level entities
    * - Layer 3: Coarse entities
    *
-   * Deduplicates and sorts by span.
+   * Deduplicates and sorts by span. Deduplication uses (start, end, nerCat) as key,
+   * matching Python's behavior in tagger.py:518-540 where entities across layers
+   * are deduplicated using (doc_idx, label, start, end) within each sentence.
+   * Since start/end are batch-local and unique per entity position, sentenceId is redundant.
    *
    * @param layer1 - Entities from layer 1
    * @param layer2 - Entities from layer 2
    * @param layer3 - Entities from layer 3
+   * @param tokens - Token array (unused but kept for API compatibility)
    * @returns Merged and deduplicated entity list
    */
-  mergeEntityLayers(layer1: Entity[], layer2: Entity[], layer3: Entity[]): Entity[] {
+  mergeEntityLayers(layer1: Entity[], layer2: Entity[], layer3: Entity[], tokens?: Token[]): Entity[] {
     const allEntitiesMap = new Map<string, Entity>();
 
+    // Deduplicate using global token ids to avoid collisions when a long sentence
+    // is split across batches (Python uses doc_idx for chunk identity).
+    // Python reference: booknlp/english/tagger.py:509-543 uses (doc_idx, label, start, end)
     const addEntities = (entities: Entity[]) => {
       for (const entity of entities) {
-        const key = `${entity.start}-${entity.end}-${entity.nerCat}`;
+        const startTokenId = tokens?.[entity.start]?.tokenId ?? entity.start;
+        const endTokenId = tokens?.[entity.end - 1]?.tokenId ?? entity.end;
+        const key = `${startTokenId}-${endTokenId}-${entity.nerCat}`;
         if (!allEntitiesMap.has(key)) {
           allEntitiesMap.set(key, entity);
         }

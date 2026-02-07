@@ -66,6 +66,7 @@ def process_with_python_booknlp(text: str, output_file: str):
         "entities": result.entities,
         "supersense": result.supersense,
         "timing": result.timing,
+        "_debug": result._debug,
     }
 
     with open(output_file, "w", encoding="utf-8") as f:

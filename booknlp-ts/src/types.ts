@@ -35,10 +35,17 @@ export interface ParagraphBoundary {
   end: number;
 }
 
+export interface NounChunk {
+  start: number;
+  end: number;
+  text: string;
+}
+
 export interface SpaCyContext {
   tokens: SpaCyToken[];
   sentences: SentenceBoundary[];
   paragraphs?: ParagraphBoundary[];
+  nounChunks?: NounChunk[];
 }
 
 export interface Token {
@@ -93,6 +100,7 @@ export interface BookNLPResult {
   entities: EntityAnnotation[];
   supersense: SupersenseAnnotation[];
   timing: Record<string, any>;
+  _debug?: Record<string, any>;
 }
 
 export type ExecutionProvider = 'wasm' | 'webgl' | 'webgpu';

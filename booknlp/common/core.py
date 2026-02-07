@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Any
 from booknlp.common.pipelines import Token
 
@@ -11,3 +11,4 @@ class BookNLPResult:
     entities: List[Dict[str, Any]]
     supersense: List[Any]
     timing: Dict[str, Any]
+    _debug: Dict[str, Any] = field(default_factory=dict)

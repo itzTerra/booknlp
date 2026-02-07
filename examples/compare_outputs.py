@@ -154,6 +154,58 @@ def compare_timing(python_timing: Dict, ts_timing: Dict) -> None:
         print(f"  {key}: Python={py_time}, TypeScript={ts_time}")
 
 
+def compare_debug_info(python_debug: Dict, ts_debug: Dict) -> bool:
+    """Compare intermediate debug values from both implementations."""
+    print("\n=== Comparing Debug/Intermediate Values ===")
+
+    if not python_debug or not ts_debug:
+        print(
+            f"⚠️  Debug info not available. Python={bool(python_debug)}, TypeScript={bool(ts_debug)}"
+        )
+        return True
+
+    print("Python Debug Info:")
+    for key, value in sorted(python_debug.items()):
+        if isinstance(value, (dict, list)) and len(str(value)) > 100:
+            print(
+                f"  {key}: {type(value).__name__} (length={len(value) if isinstance(value, list) else len(str(value))})"
+            )
+        else:
+            print(f"  {key}: {value}")
+
+    print("\nTypeScript Debug Info:")
+    for key, value in sorted(ts_debug.items()):
+        if isinstance(value, (dict, list)) and len(str(value)) > 100:
+            print(
+                f"  {key}: {type(value).__name__} (length={len(value) if isinstance(value, list) else len(str(value))})"
+            )
+        else:
+            print(f"  {key}: {value}")
+
+    print("\nDebug Info Comparison:")
+    mismatches = 0
+    all_keys = set(python_debug.keys()) | set(ts_debug.keys())
+    for key in sorted(all_keys):
+        py_val = python_debug.get(key, "MISSING")
+        ts_val = ts_debug.get(key, "MISSING")
+
+        if key in ["raw_tokens_sample", "raw_batch_sample"]:
+            continue
+
+        if py_val != ts_val:
+            print(f"  ⚠️  {key} mismatch: Python={py_val}, TypeScript={ts_val}")
+            mismatches += 1
+        else:
+            print(f"  ✓ {key} matches: {py_val}")
+
+    if mismatches == 0:
+        print("\n✓ All debug info matches!")
+        return True
+    else:
+        print(f"\n⚠️  {mismatches} debug info mismatches found")
+        return False
+
+
 def main():
     examples_dir = Path(__file__).parent
     python_output = examples_dir / "python_output.json"
@@ -184,7 +236,13 @@ def main():
     supersense_match = compare_supersense(py_data["supersense"], ts_data["supersense"])
     all_match = all_match and supersense_match
 
-    compare_timing(py_data["timing"], ts_data["timing"])
+    # compare_timing(py_data["timing"], ts_data["timing"])
+
+    # Compare debug/intermediate values if available
+    py_debug = py_data.get("_debug", {})
+    ts_debug = ts_data.get("_debug", {})
+    debug_match = compare_debug_info(py_debug, ts_debug)
+    all_match = all_match and debug_match
 
     print("\n" + "=" * 50)
     if all_match:

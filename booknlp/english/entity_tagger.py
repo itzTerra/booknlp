@@ -88,7 +88,9 @@ class LitBankEntityTagger:
             wn_batches.append(wn_senses)
         return wn_batches
 
-    def tag(self, toks, doEvent=True, doEntities=True, doSS=True):
+    def tag(self, toks, doEvent=True, doEntities=True, doSS=True, debug_info=None):
+        if debug_info is None:
+            debug_info = {}
         max_sentence_length = 500
 
         entities = []
@@ -241,5 +243,17 @@ class LitBankEntityTagger:
                     phrase = sents[idx][start].text
                     events[start_token] = 1
                 return_vals["events"] = events
+
+        debug_info["batches_count"] = len(batched_sents)
+        debug_info["raw_batch_sample"] = {
+            "batched_sents_count": len(batched_sents[:1]),
+            "entity_predictions_sample": [
+                str(p) for p in preds_in_order[:1] if doEntities
+            ],
+        }
+        debug_info["extracted_entities_count"] = len(entities) if doEntities else 0
+        debug_info["extracted_supersense_count"] = (
+            len(supersense_entities) if doSS else 0
+        )
 
         return return_vals

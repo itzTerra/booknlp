@@ -98,47 +98,51 @@ export class ONNXTaggerController {
     layer2To3TransformMatrix: number[][][],
     wordnetSenses: number[][],
     seqLengths: number[],
+    maxOriginalTokens?: number,
   ): Promise<Partial<TaggerLogits>> {
     if (!this.onnxSession) {
       throw new Error('ONNX model not loaded. Call loadModel() first.');
     }
 
     const batchSize = inputIds.length;
-    const seqLen = inputIds[0].length;
-    const outputSeqLen = Math.max(seqLen - 1, 0);
+    const wordpieceSeqLen = inputIds[0].length;
+    const originalSeqLen = maxOriginalTokens ?? transforms[0]?.length ?? wordpieceSeqLen;
+    const outputSeqLen = originalSeqLen - 1;
 
-    // Prepare ONNX model inputs
+    const eventOutputSeqLen = outputSeqLen;
+
+    // Prepare ONNX model inputs (asymmetric transforms: [batch, original_seq, wordpiece_seq])
     // All ONNX inputs must be properly formatted tensors matching the model's expected schema
     const feeds: Record<string, ort.Tensor> = {
       input_ids: new ort.Tensor(
         'int64',
         this.toBigInt64Array2D(inputIds),
-        [batchSize, seqLen]
+        [batchSize, wordpieceSeqLen]
       ),
       attention_mask: new ort.Tensor(
         'int64',
         this.toBigInt64Array2D(attentionMask),
-        [batchSize, seqLen]
+        [batchSize, wordpieceSeqLen]
       ),
       transforms: new ort.Tensor(
         'float32',
         Float32Array.from(transforms.flat(2)),
-        [batchSize, seqLen, seqLen]
+        [batchSize, originalSeqLen, wordpieceSeqLen]
       ),
       matrix1: new ort.Tensor(
         'float32',
         Float32Array.from(layer1To2TransformMatrix.flat(2)),
-        [batchSize, seqLen, seqLen]
+        [batchSize, originalSeqLen, originalSeqLen]
       ),
       matrix2: new ort.Tensor(
         'float32',
         Float32Array.from(layer2To3TransformMatrix.flat(2)),
-        [batchSize, seqLen, seqLen]
+        [batchSize, originalSeqLen, originalSeqLen]
       ),
       wn: new ort.Tensor(
         'int64',
         this.toBigInt64Array2D(wordnetSenses),
-        [batchSize, seqLen]
+        [batchSize, originalSeqLen]
       ),
     };
 
@@ -154,7 +158,7 @@ export class ONNXTaggerController {
     const supersenseLogitsData = results.supersense_logits.data as Float32Array;
     const eventLogitsData = results.event_logits.data as Float32Array;
 
-    // Reshape flat arrays into [batch_size, seq_len, num_labels] format
+    // Reshape flat arrays into [batch_size, original_seq, num_labels] format
     const reshape3D = (
       data: Float32Array,
       batchSize: number,
@@ -193,7 +197,7 @@ export class ONNXTaggerController {
         outputSeqLen,
         supersenseNumLabels
       ),
-      eventLogits: reshape3D(eventLogitsData, batchSize, outputSeqLen, eventNumLabels),
+      eventLogits: reshape3D(eventLogitsData, batchSize, eventOutputSeqLen, eventNumLabels),
     };
   }
 

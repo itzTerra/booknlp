@@ -1,11 +1,11 @@
 import { SpaCyContext, SpaCyToken, BookNLPConfig, ValidationError } from 'types';
 
-export class SpacyValidationError extends Error {
+export class SpaCyValidationError extends Error {
   constructor(
     public errors: Array<{ field: string; message: string }>,
   ) {
     super(`Validation failed: ${errors.map((e) => `${e.field}: ${e.message}`).join('; ')}`);
-    this.name = 'SpacyValidationError';
+    this.name = 'SpaCyValidationError';
   }
 }
 
@@ -132,6 +132,6 @@ export function validateBookNLPConfig(config: BookNLPConfig): ValidationError[] 
 
 export function throwIfValidationErrors(errors: ValidationError[]): void {
   if (errors.length > 0) {
-    throw new SpacyValidationError(errors);
+    throw new SpaCyValidationError(errors);
   }
 }

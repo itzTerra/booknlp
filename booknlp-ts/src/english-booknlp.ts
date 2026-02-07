@@ -32,7 +32,7 @@ function resolveResourceUrls(config: BookNLPConfig): ResourceUrls {
   };
 }
 
-export class BookNLPPipeline {
+export class EnglishBookNLP {
   private config: BookNLPConfig;
   private entityTagger: EntityTagger;
   private tokens: Token[] = [];
@@ -71,7 +71,7 @@ export class BookNLPPipeline {
 
   private ensureInitialized(): void {
     if (!this.initialized) {
-      throw new Error('BookNLPPipeline not initialized. Call initialize() first.');
+      throw new Error('EnglishBookNLP not initialized. Call initialize() first.');
     }
   }
 
@@ -87,12 +87,25 @@ export class BookNLPPipeline {
     this.tokens = convertSpaCyToTokens(spaCyContext);
     this.timing['token_conversion'] = performance.now() - conversionTime;
 
+    const debugInfo: Record<string, any> = {
+      raw_tokens_count: this.tokens.length,
+      raw_tokens_sample: this.tokens.slice(0, 5).map(t => ({
+        text: t.text,
+        tokenId: t.tokenId,
+        sentenceId: t.sentenceId,
+      })),
+    };
+
     const taggerTime = performance.now();
     const taggerResults = await this.entityTagger.tag(
       this.tokens,
       spaCyContext.tokens,
     );
     this.timing['tagger_inference'] = performance.now() - taggerTime;
+
+    if (taggerResults._debug) {
+      Object.assign(debugInfo, taggerResults._debug);
+    }
 
     // Apply pipeline task flags to selectively populate results
     // Mirror Python behavior (english_booknlp.py:105-111): only populate results for enabled tasks
@@ -108,28 +121,21 @@ export class BookNLPPipeline {
 
     let entities: BookNLPResult['entities'] = [];
     if (doEntities && taggerResults.entities) {
-      entities = [...taggerResults.entities].sort((a, b) => {
-        if (a.startToken !== b.startToken) {
-          return a.startToken - b.startToken;
-        }
-        if (a.endToken !== b.endToken) {
-          return a.endToken - b.endToken;
-        }
-        if (a.prop !== b.prop) {
-          return a.prop.localeCompare(b.prop);
-        }
-        if (a.cat !== b.cat) {
-          return a.cat.localeCompare(b.cat);
-        }
-        return a.text.localeCompare(b.text);
-      });
-      taggerResults.entities.forEach((entity) => {
-        for (let i = entity.startToken; i < entity.endToken; i++) {
-          if (i < this.tokens.length) {
-            this.tokens[i].ner = entity.cat;
-          }
-        }
-      });
+      // Mirror Python entity sorting behavior: sort by (startToken, endToken, fullLabel, text)
+      // Python sorts the tuple (start, end, label, text) where label is the combined prop_cat string.
+      // Reference: booknlp/english/english_booknlp.py:254 sorted(entity_vals["entities"])
+      const fullLabelEntities = taggerResults.entities.map(e => ({
+        ...e,
+        fullLabel: `${e.prop}_${e.cat}`,
+      }));
+      entities = fullLabelEntities
+        .sort((a, b) => {
+          if (a.startToken !== b.startToken) return a.startToken - b.startToken;
+          if (a.endToken !== b.endToken) return a.endToken - b.endToken;
+          if (a.fullLabel !== b.fullLabel) return a.fullLabel.localeCompare(b.fullLabel);
+          return a.text.localeCompare(b.text);
+        })
+        .map(({ fullLabel, ...e }) => e);
     }
 
     let supersense: any[] = [];
@@ -139,19 +145,25 @@ export class BookNLPPipeline {
 
     this.timing['total'] = performance.now() - startTime;
 
+    // Extract noun chunks from spaCy context if available.
+    // Python obtains these from spaCy's doc.noun_chunks.
+    // Reference: booknlp/common/pipelines.py:184 and pipelines.py:tag() returning doc.noun_chunks
+    const nounChunks = spaCyContext.nounChunks || [];
+
     return {
       tokens: this.tokens,
       sents: spaCyContext.sentences,
-      nounChunks: [],
+      nounChunks,
       entities: entities,
       supersense: supersense,
       timing: this.timing,
+      _debug: debugInfo,
     };
   }
 }
 
-export async function createPipeline(config: BookNLPConfig): Promise<BookNLPPipeline> {
-  const pipeline = new BookNLPPipeline(config);
+export async function createPipeline(config: BookNLPConfig): Promise<EnglishBookNLP> {
+  const pipeline = new EnglishBookNLP(config);
   await pipeline.initialize();
   return pipeline;
 }

@@ -29,6 +29,9 @@ class TaggerLogitsWrapper(nn.Module):
     Tagger wrapper that exports logits only (no CRF decoding).
 
     Outputs logits for all heads so decoding can be handled externally.
+
+    Note: Transform matrices are asymmetric [batch, original_tokens, wordpiece_tokens]
+    since they reduce BERT wordpiece outputs back to original token space.
     """
 
     def __init__(self, tagger: Tagger):
@@ -205,22 +208,29 @@ def convert_tagger_to_onnx(
 
     device = tagger.device if hasattr(tagger, "device") else "cpu"
     batch_size = 1
-    seq_len = 256
+    wordpiece_seq_len = 512
+    original_seq_len = 256
 
     wrapper = TaggerLogitsWrapper(tagger).to(device)
     wrapper.eval()
 
     dummy_input_ids = torch.randint(
-        0, 1000, (batch_size, seq_len), device=device, dtype=torch.long
+        0, 1000, (batch_size, wordpiece_seq_len), device=device, dtype=torch.long
     )
     dummy_attention_mask = torch.ones(
-        (batch_size, seq_len), device=device, dtype=torch.long
+        (batch_size, wordpiece_seq_len), device=device, dtype=torch.long
     )
-    dummy_transforms = torch.randn(batch_size, seq_len, seq_len, device=device)
-    dummy_matrix1 = torch.randn(batch_size, seq_len, seq_len, device=device)
-    dummy_matrix2 = torch.randn(batch_size, seq_len, seq_len, device=device)
+    dummy_transforms = torch.randn(
+        batch_size, original_seq_len, wordpiece_seq_len, device=device
+    )
+    dummy_matrix1 = torch.randn(
+        batch_size, original_seq_len, original_seq_len, device=device
+    )
+    dummy_matrix2 = torch.randn(
+        batch_size, original_seq_len, original_seq_len, device=device
+    )
     dummy_wn = torch.randint(
-        0, 50, (batch_size, seq_len), device=device, dtype=torch.long
+        0, 50, (batch_size, original_seq_len), device=device, dtype=torch.long
     )
 
     model_path = output_dir / "model.onnx"
@@ -252,17 +262,17 @@ def convert_tagger_to_onnx(
             "event_logits",
         ],
         dynamic_axes={
-            "input_ids": {0: "batch", 1: "seq"},
-            "attention_mask": {0: "batch", 1: "seq"},
-            "transforms": {0: "batch", 1: "seq", 2: "seq"},
-            "matrix1": {0: "batch", 1: "seq", 2: "seq"},
-            "matrix2": {0: "batch", 1: "seq", 2: "seq"},
-            "wn": {0: "batch", 1: "seq"},
-            "entity_logits1": {0: "batch", 1: "seq"},
-            "entity_logits2": {0: "batch", 1: "seq"},
-            "entity_logits3": {0: "batch", 1: "seq"},
-            "supersense_logits": {0: "batch", 1: "seq"},
-            "event_logits": {0: "batch", 1: "seq"},
+            "input_ids": {0: "batch", 1: "wordpiece_seq"},
+            "attention_mask": {0: "batch", 1: "wordpiece_seq"},
+            "transforms": {0: "batch", 1: "original_seq", 2: "wordpiece_seq"},
+            "matrix1": {0: "batch", 1: "original_seq", 2: "original_seq"},
+            "matrix2": {0: "batch", 1: "original_seq", 2: "original_seq"},
+            "wn": {0: "batch", 1: "original_seq"},
+            "entity_logits1": {0: "batch", 1: "original_seq"},
+            "entity_logits2": {0: "batch", 1: "original_seq"},
+            "entity_logits3": {0: "batch", 1: "original_seq"},
+            "supersense_logits": {0: "batch", 1: "original_seq"},
+            "event_logits": {0: "batch", 1: "original_seq"},
         },
         opset_version=opset_version,
         do_constant_folding=True,
@@ -271,10 +281,25 @@ def convert_tagger_to_onnx(
     )
 
     print(f"✓ Full tagger model exported to {model_path}")
+    print("\nModel inputs (with corrected asymmetric transforms):")
+    print("  - input_ids: [batch, wordpiece_seq] - BERT tokenized input")
+    print("  - attention_mask: [batch, wordpiece_seq] - BERT attention mask")
+    print(
+        "  - transforms: [batch, original_seq, wordpiece_seq] - reduces wordpiece to original tokens"
+    )
+    print(
+        "  - matrix1: [batch, original_seq, original_seq] - layer1-to-layer2 transformation"
+    )
+    print(
+        "  - matrix2: [batch, original_seq, original_seq] - layer2-to-layer3 transformation"
+    )
+    print("  - wn: [batch, original_seq] - WordNet sense IDs")
     print("\nModel outputs (logits only):")
-    print("  - entity_logits1, entity_logits2, entity_logits3: entity tag logits")
-    print("  - supersense_logits: supersense tag logits")
-    print("  - event_logits: event tag logits")
+    print(
+        "  - entity_logits1, entity_logits2, entity_logits3: [batch, original_seq, labels]"
+    )
+    print("  - supersense_logits: [batch, original_seq, labels]")
+    print("  - event_logits: [batch, original_seq, 2]")
 
     return model_path
 
@@ -490,9 +515,6 @@ def validate_onnx_model(
                 dummy_matrix1,
                 dummy_matrix2,
                 dummy_wn,
-                torch.tensor(
-                    [actual_seq_len] * batch_size, dtype=torch.long, device=device
-                ),
             )
 
         ort_inputs = {

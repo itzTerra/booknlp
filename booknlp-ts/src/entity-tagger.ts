@@ -1,6 +1,6 @@
 import { SpaCyToken, Token, EntityAnnotation, SupersenseAnnotation, ResourceUrls, ExecutionProvider } from 'types';
 import { ONNXTaggerController } from 'tagger-controller';
-import { BertTokenizer } from 'preprocessing';
+import { Tokenizer } from 'preprocessing';
 import { CRFDecoder } from 'crf-decoder';
 import { AdvancedPostProcessor } from 'advanced-postprocessor';
 
@@ -13,7 +13,7 @@ export class EntityTagger {
   private advancedPostProcessor: AdvancedPostProcessor;
   private crfDecoder: CRFDecoder;
   private resourceUrls: ResourceUrls;
-  private tokenizer: BertTokenizer;
+  private tokenizer: Tokenizer;
   private modelId: string;
   private wordNetSenses: WordNetSense = {};
   private entityTagset: Map<number, string> = new Map();
@@ -31,7 +31,7 @@ export class EntityTagger {
     this.advancedPostProcessor = new AdvancedPostProcessor();
     this.crfDecoder = new CRFDecoder();
     this.resourceUrls = resourceUrls;
-    this.tokenizer = new BertTokenizer();
+    this.tokenizer = new Tokenizer();
     this.modelId = modelPath;
     this.buildEntityCategoryMap();
   }
@@ -193,6 +193,7 @@ export class EntityTagger {
     entities?: EntityAnnotation[];
     supersense?: SupersenseAnnotation[];
     events?: Set<number>;
+    _debug?: Record<string, any>;
   }> {
     if (!this.initialized) {
       throw new Error('EntityTagger not initialized. Call initialize() first.');
@@ -207,15 +208,32 @@ export class EntityTagger {
 
     const sentenceBatches = this.createSentenceBatches(tokens, filteredSpaCyTokens);
 
+    // Match Python: get_batches sorts by BERT token length before batching.
+    // Reference: booknlp/common/layered_reader.py:107-140
+    const orderedSentences = sentenceBatches
+      .map((batch) => ({
+        batch,
+        length: this.estimateSentenceLength(batch.spaCyTokens),
+      }))
+      .sort((a, b) => a.length - b.length);
+
     const allEntityAnnotations: EntityAnnotation[] = [];
     const allSupersenseAnnotations: SupersenseAnnotation[] = [];
     const allEvents = new Set<number>();
 
-    for (let batchIdx = 0; batchIdx < sentenceBatches.length; batchIdx += maxBatchSize) {
-      const batchSlice = sentenceBatches.slice(batchIdx, batchIdx + maxBatchSize);
-      const batchResults = await this.processSentenceBatch(
-        batchSlice,
-      );
+    let batchCount = 0;
+    let batchIdx = 0;
+    let currentBatchSize = maxBatchSize;
+
+    while (batchIdx < orderedSentences.length) {
+      const batchSizeUsed = currentBatchSize;
+      const batchEnd = Math.min(batchIdx + batchSizeUsed, orderedSentences.length);
+      const batchSlice = orderedSentences.slice(batchIdx, batchEnd);
+      const batchMaxLen = Math.max(...batchSlice.map(item => item.length));
+      const batchInputs = batchSlice.map(item => item.batch);
+
+      const batchResults = await this.processSentenceBatch(batchInputs);
+      batchCount++;
 
       if (batchResults.entities) {
         allEntityAnnotations.push(...batchResults.entities);
@@ -226,12 +244,31 @@ export class EntityTagger {
       if (batchResults.events) {
         batchResults.events.forEach(tokenId => allEvents.add(tokenId));
       }
+
+      // Adaptive batch sizing to match Python
+      // Reference: booknlp/common/layered_reader.py:318-325
+      if (batchMaxLen > 200) {
+        currentBatchSize = 6;
+      } else if (batchMaxLen > 100) {
+        currentBatchSize = 12;
+      } else {
+        currentBatchSize = maxBatchSize;
+      }
+
+      batchIdx += batchSizeUsed;
     }
+
+    const debugInfo: Record<string, any> = {
+      batches_count: batchCount,
+      extracted_entities_count: allEntityAnnotations.length,
+      extracted_supersense_count: allSupersenseAnnotations.length,
+    };
 
     return {
       entities: allEntityAnnotations,
       supersense: allSupersenseAnnotations,
       events: allEvents,
+      _debug: debugInfo,
     };
   }
 
@@ -253,7 +290,9 @@ export class EntityTagger {
       const tokenLength = this.estimateTokenLength(spaCyToken);
       const sentenceChanged = lastSentenceId !== -1 && token.sentenceId !== lastSentenceId;
 
-      if (sentenceChanged && currentSentenceTokens.length > 0) {
+      // Match Python split condition when sentences exceed max length.
+      // Reference: booknlp/english/entity_tagger.py:108-114
+      if ((sentenceChanged || currentLength + tokenLength > maxSequenceLength) && currentSentenceTokens.length > 0) {
         sentenceChunks.push({
           tokens: currentSentenceTokens,
           spaCyTokens: currentSentenceSpaCy,
@@ -284,7 +323,7 @@ export class EntityTagger {
     let combinedLength = 0;
 
     for (const chunk of sentenceChunks) {
-      if (combinedLength + chunk.length > maxSequenceLength && combinedTokens.length > 0) {
+      if (combinedLength + chunk.length >= maxSequenceLength && combinedTokens.length > 0) {
         batches.push({
           tokens: combinedTokens,
           spaCyTokens: combinedSpaCy,
@@ -313,6 +352,11 @@ export class EntityTagger {
     return this.tokenizer.countTokens(token.text);
   }
 
+  private estimateSentenceLength(spaCyTokens: SpaCyToken[]): number {
+    const tokenization = this.tokenizer.tokenizeTokens(spaCyTokens);
+    return tokenization.tokenIds.length;
+  }
+
   private async processSentenceBatch(
     batches: Array<{ tokens: Token[]; spaCyTokens: SpaCyToken[] }>,
   ): Promise<{
@@ -323,26 +367,26 @@ export class EntityTagger {
     const maxSequenceLength = 500;
 
     // Process each batch separately, each batch already concatenates sentences up to max length
-    // Each batch gets its own [CLS] and [SEP], matching Python's chunking behavior
+    // CRITICAL FIX: Process all batches together in ONE ONNX call, not individually
+    // Python calls tag_all ONCE with all batched data
+    // Reference: booknlp/english/tagger.py:208-214
     const allEntities: EntityAnnotation[] = [];
     const allSupersense: SupersenseAnnotation[] = [];
     const allEvents = new Set<number>();
 
-    for (const batch of batches) {
-      const singleBatchResults = await this.processSingleBatch(
-        [batch],
-        maxSequenceLength
-      );
+    const singleBatchResults = await this.processSingleBatch(
+      batches,
+      maxSequenceLength
+    );
 
-      if (singleBatchResults.entities) {
+    if (singleBatchResults.entities) {
         allEntities.push(...singleBatchResults.entities);
-      }
-      if (singleBatchResults.supersense) {
+    }
+    if (singleBatchResults.supersense) {
         allSupersense.push(...singleBatchResults.supersense);
-      }
-      if (singleBatchResults.events) {
+    }
+    if (singleBatchResults.events) {
         singleBatchResults.events.forEach(tokenId => allEvents.add(tokenId));
-      }
     }
 
     return {
@@ -368,6 +412,7 @@ export class EntityTagger {
     const tokenCounts: number[] = [];
 
     let maxSeqLen = 0;
+    let maxOriginalTokens = 0;
 
     for (const batch of batches) {
       const tokenization = this.tokenizer.tokenizeTokens(batch.spaCyTokens);
@@ -389,7 +434,10 @@ export class EntityTagger {
       }
 
       const seqLen = inputIds.length;
+      const originalTokenCount = batch.tokens.length + 2;
+
       maxSeqLen = Math.max(maxSeqLen, seqLen);
+      maxOriginalTokens = Math.max(maxOriginalTokens, originalTokenCount);
 
       allInputIds.push(inputIds);
       allAttentionMask.push(attentionMask);
@@ -398,31 +446,32 @@ export class EntityTagger {
       tokenCounts.push(batch.tokens.length);
     }
 
-    const paddedLen = Math.ceil(maxSeqLen / 8) * 8;
+    const paddedWordpieceLen = Math.ceil(maxSeqLen / 8) * 8;
+    const paddedOriginalLen = Math.ceil(maxOriginalTokens / 8) * 8;
 
     for (let i = 0; i < allInputIds.length; i++) {
-      while (allInputIds[i].length < paddedLen) {
+      while (allInputIds[i].length < paddedWordpieceLen) {
         allInputIds[i].push(0);
         allAttentionMask[i].push(0);
       }
 
-      while (allWordnetSenses[i].length < paddedLen) {
+      while (allWordnetSenses[i].length < paddedOriginalLen) {
         allWordnetSenses[i].push(0);
       }
 
-      while (allTransformMatrices[i].length < paddedLen) {
-        allTransformMatrices[i].push(new Array(paddedLen).fill(0));
+      while (allTransformMatrices[i].length < paddedOriginalLen) {
+        allTransformMatrices[i].push(new Array(paddedWordpieceLen).fill(0));
       }
 
       for (let j = 0; j < allTransformMatrices[i].length; j++) {
-        while (allTransformMatrices[i][j].length < paddedLen) {
+        while (allTransformMatrices[i][j].length < paddedWordpieceLen) {
           allTransformMatrices[i][j].push(0);
         }
       }
 
     }
 
-    const identityMatrix = this.createIdentityMatrix(paddedLen, paddedLen);
+    const identityMatrix = this.createIdentityMatrix(paddedOriginalLen, paddedOriginalLen);
     const identityMatrices = batches.map(() => identityMatrix);
 
     const logitsPass1 = await this.controller.predict(
@@ -433,73 +482,56 @@ export class EntityTagger {
       identityMatrices,
       allWordnetSenses,
       [],
+      paddedOriginalLen,
     );
+
+    const entityLogits1 = logitsPass1.entityLogits1;
+    const entityLogits2 = logitsPass1.entityLogits2;
+    const entityLogits3 = logitsPass1.entityLogits3;
+    const supersenseLogits = logitsPass1.supersenseLogits;
+    const eventLogits = logitsPass1.eventLogits;
+
+    if (!entityLogits1 || !entityLogits2 || !entityLogits3) {
+      return {
+        entities: [],
+        supersense: [],
+        events: new Set<number>(),
+      };
+    }
 
     const layer1Transforms: Array<{ matrix: number[][]; missing: number[]; len: number; tags: string[] }> = [];
-    const layer1Matrices: number[][][] = [];
-
-    if (logitsPass1.entityLogits1) {
-      for (let i = 0; i < batches.length; i++) {
-        const tokenCount = tokenCounts[i];
-        const effectiveSeqLen = Math.min(tokenCount + 1, paddedLen - 1);
-        const entityViterbi1 = this.crfDecoder.decodeEntity(
-          [logitsPass1.entityLogits1[i]],
-          [tokenCount]
-        );
-        const entities1IndicesFull = entityViterbi1.paths[0];
-        const entities1Indices = entities1IndicesFull.slice(0, tokenCount);
-        const layer1Transform = this.advancedPostProcessor.computeLayerTransformationFromIndices(
-          entities1Indices,
-          effectiveSeqLen
-        );
-        layer1Transforms.push(layer1Transform);
-        layer1Matrices.push(this.embedMatrix(layer1Transform.matrix, paddedLen));
-      }
-    }
-
-    const logitsPass2 = await this.controller.predict(
-      allInputIds,
-      allAttentionMask,
-      allTransformMatrices,
-      layer1Matrices.length > 0 ? layer1Matrices : identityMatrices,
-      identityMatrices,
-      allWordnetSenses,
-      [],
-    );
-
     const layer2Transforms: Array<{ matrix: number[][]; missing: number[]; len: number; tags: string[] }> = [];
-    const layer2Matrices: number[][][] = [];
 
-    if (logitsPass2.entityLogits2) {
-      for (let i = 0; i < batches.length; i++) {
-        const tokenCount = tokenCounts[i];
-        const effectiveSeqLen = Math.min(tokenCount + 1, paddedLen - 1);
-        const layer1Transform = layer1Transforms[i];
-        const entityViterbi2 = this.crfDecoder.decodeEntity(
-          [logitsPass2.entityLogits2[i]],
-          [layer1Transform ? layer1Transform.len : tokenCount]
-        );
-        const entities2IndicesFull = entityViterbi2.paths[0];
-        const sliceLen = layer1Transform ? layer1Transform.len : tokenCount;
-        const entities2Indices = entities2IndicesFull.slice(0, sliceLen);
-        const layer2Transform = this.advancedPostProcessor.computeLayerTransformationFromIndices(
-          entities2Indices,
-          effectiveSeqLen
-        );
-        layer2Transforms.push(layer2Transform);
-        layer2Matrices.push(this.embedMatrix(layer2Transform.matrix, paddedLen));
-      }
+    for (let i = 0; i < batches.length; i++) {
+      const tokenCount = tokenCounts[i];
+      const effectiveSeqLen = Math.min(tokenCount + 1, paddedOriginalLen - 1);
+
+      const entityViterbi1 = this.crfDecoder.decodeEntity(
+        [entityLogits1[i]],
+        [tokenCount]
+      );
+      const entities1Indices = entityViterbi1.paths[0].slice(0, tokenCount);
+      const layer1Transform = this.advancedPostProcessor.computeLayerTransformationFromIndices(
+        entities1Indices,
+        effectiveSeqLen
+      );
+      layer1Transforms.push(layer1Transform);
+
+      const entityViterbi2 = this.crfDecoder.decodeEntity(
+        [entityLogits2[i]],
+        [tokenCount]
+      );
+      const entities2IndicesRaw = entityViterbi2.paths[0].slice(0, tokenCount);
+      const entities2TagsFixed = this.advancedPostProcessor.fixBIOTags(
+        this.advancedPostProcessor.convertIndicesToTags(entities2IndicesRaw, this.entityTagset)
+      );
+      let entities2Indices = this.advancedPostProcessor.convertTagsToIndices(entities2TagsFixed);
+      const layer2Transform = this.advancedPostProcessor.computeLayerTransformationFromIndices(
+        entities2Indices,
+        effectiveSeqLen
+      );
+      layer2Transforms.push(layer2Transform);
     }
-
-    const logitsPass3 = await this.controller.predict(
-      allInputIds,
-      allAttentionMask,
-      allTransformMatrices,
-      layer1Matrices.length > 0 ? layer1Matrices : identityMatrices,
-      layer2Matrices.length > 0 ? layer2Matrices : identityMatrices,
-      allWordnetSenses,
-      [],
-    );
 
     const allEntities: EntityAnnotation[] = [];
     const allSupersense: SupersenseAnnotation[] = [];
@@ -509,36 +541,30 @@ export class EntityTagger {
       const batch = batches[i];
       const batchTokens = batch.tokens;
       const tokenCount = tokenCounts[i];
-      const effectiveSeqLen = Math.min(tokenCount + 1, paddedLen - 1);
+      const effectiveSeqLen = Math.min(tokenCount + 1, paddedOriginalLen - 1);
+      const layer1Transform = layer1Transforms[i];
+      const layer2Transform = layer2Transforms[i];
 
       // Process entity logits with CRF decoding for 3-layer hierarchical NER
-      if (logitsPass1.entityLogits1 && logitsPass2.entityLogits2 && logitsPass3.entityLogits3) {
+      if (entityLogits1 && entityLogits2 && entityLogits3) {
         const entityViterbi1 = this.crfDecoder.decodeEntity(
-          [logitsPass1.entityLogits1[i]],
+          [entityLogits1[i]],
           [tokenCount]
         );
         const entities1Indices = entityViterbi1.paths[0].slice(0, tokenCount);
-        const layer1Transform = this.advancedPostProcessor.computeLayerTransformationFromIndices(
-          entities1Indices,
-          effectiveSeqLen
-        );
 
         const entityViterbi2 = this.crfDecoder.decodeEntity(
-          [logitsPass2.entityLogits2[i]],
-          [layer1Transform.len]
+          [entityLogits2[i]],
+          [tokenCount]
         );
         const entities2IndicesRaw = entityViterbi2.paths[0].slice(0, layer1Transform.len);
         const entities2TagsFixed = this.advancedPostProcessor.fixBIOTags(
           this.advancedPostProcessor.convertIndicesToTags(entities2IndicesRaw, this.entityTagset)
         );
         let entities2Indices = this.advancedPostProcessor.convertTagsToIndices(entities2TagsFixed);
-        const layer2Transform = this.advancedPostProcessor.computeLayerTransformationFromIndices(
-          entities2Indices,
-          effectiveSeqLen
-        );
 
         const entityViterbi3 = this.crfDecoder.decodeEntity(
-          [logitsPass3.entityLogits3[i]],
+          [entityLogits3[i]],
           [layer2Transform.len]
         );
         const entities3IndicesRaw = entityViterbi3.paths[0].slice(0, layer2Transform.len);
@@ -605,9 +631,9 @@ export class EntityTagger {
       }
 
       // Process supersense logits with CRF decoding for semantic role labels
-      if (logitsPass1.supersenseLogits) {
+      if (supersenseLogits) {
         const supersenseViterbi = this.crfDecoder.decodeSupersense(
-          [logitsPass1.supersenseLogits[i]],
+          [supersenseLogits[i]],
           [tokenCount]
         );
         const supersenseIndices = supersenseViterbi.paths[0].slice(0, tokenCount);
@@ -644,17 +670,15 @@ export class EntityTagger {
       // Python code: for col in range(batched_orig_token_lens[b][row] - 1)
       // where batched_orig_token_lens[b][row] includes [CLS], tokens, and [SEP]
       // So for N original tokens: range(N + 2 - 1) = range(N + 1), processing 0 to N (inclusive)
-      if (logitsPass1.eventLogits) {
-        const eventLogitsBatch = logitsPass1.eventLogits[i];
+      if (eventLogits) {
+        const eventLogitsBatch = eventLogits[i];
 
         // Process tokens 0 to tokenCount (inclusive), matching Python's range(tokenCount + 1) behavior
         for (let tokenIdx = 0; tokenIdx <= tokenCount && tokenIdx < eventLogitsBatch.length; tokenIdx++) {
           const logitPair = eventLogitsBatch[tokenIdx];
           if (logitPair && logitPair.length >= 2) {
             const [logit0, logit1] = logitPair;
-            // If logit1 > logit0, token is classified as event (label 1)
             if (logit1 > logit0) {
-              // Skip [SEP] token at position tokenCount
               if (tokenIdx < tokenCount) {
                 const token = batchTokens[tokenIdx];
                 if (token) {

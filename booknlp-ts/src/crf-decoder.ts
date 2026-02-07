@@ -218,8 +218,8 @@ export class CRFDecoder {
       for (let to = 0; to < numLabels; to++) {
         const toRow: number[] = [];
         for (let from = 0; from < numLabels; from++) {
-          // Score = vit[b, from] + transitions[from, to]
-          toRow.push(vit[b][from] + transitions[from][to]);
+          // Match Python CRF: transitions are indexed as [to][from] (see booknlp/common/crf.py)
+          toRow.push(vit[b][from] + transitions[to][from]);
         }
         batchResult.push(toRow);
       }

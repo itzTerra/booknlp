@@ -8,9 +8,11 @@ const SPECIAL_TOKENS = {
   PAD: '[PAD]',
 };
 
-const MAX_SUBWORD_LENGTH = 500;
+// Python splits at 500 wordpieces before adding [CLS]/[SEP], so allow +2 here.
+// Reference: booknlp/english/entity_tagger.py (max_sentence_length = 500).
+const MAX_SUBWORD_LENGTH = 502;
 
-export class BertTokenizer {
+export class Tokenizer {
   private tokenizer: any;
   private initialized: boolean = false;
   private static environmentConfigured: boolean = false;
@@ -18,19 +20,21 @@ export class BertTokenizer {
   async initialize(modelId: string): Promise<void> {
     this.configureTransformersEnvironment();
     const normalizedModelId = this.normalizeModelId(modelId);
-    this.tokenizer = await AutoTokenizer.from_pretrained(normalizedModelId);
+    this.tokenizer = await AutoTokenizer.from_pretrained(normalizedModelId, {
+      legacy: true
+    });
     this.initialized = true;
   }
 
   private configureTransformersEnvironment(): void {
-    if (BertTokenizer.environmentConfigured) {
+    if (Tokenizer.environmentConfigured) {
       return;
     }
 
     env.allowLocalModels = false;
     env.allowRemoteModels = true;
     env.localModelPath = '';
-    BertTokenizer.environmentConfigured = true;
+    Tokenizer.environmentConfigured = true;
   }
 
   private normalizeModelId(modelId: string): string {

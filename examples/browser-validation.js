@@ -55,6 +55,7 @@ async function runValidation() {
             entities: result.entities,
             supersense: result.supersense,
             timing: result.timing,
+            _debug: result._debug,
         };
 
         // Return result to Puppeteer
