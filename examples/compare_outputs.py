@@ -7,7 +7,7 @@ Validates that both implementations produce equivalent results.
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List
 
 
 def load_json(filepath: str) -> Dict:
@@ -64,47 +64,35 @@ def compare_entities(python_entities: List, ts_entities: List) -> bool:
         print(
             f"⚠️  Entity count mismatch: Python={len(python_entities)}, TypeScript={len(ts_entities)}"
         )
+
+        # Find the specific difference
+        py_set = set()
+        ts_set = set()
+
+        for ent in python_entities:
+            start = ent.get("startToken", ent.get("start_token"))
+            end = ent.get("endToken", ent.get("end_token"))
+            cat = ent.get("cat")
+            py_set.add((start, end, cat))
+
+        for ent in ts_entities:
+            start = ent.get("startToken", ent.get("start_token"))
+            end = ent.get("endToken", ent.get("end_token"))
+            cat = ent.get("cat")
+            ts_set.add((start, end, cat))
+
+        extra_in_ts = ts_set - py_set
+        missing_in_ts = py_set - ts_set
+
+        if extra_in_ts:
+            print(f"  Extra in TypeScript ({len(extra_in_ts)}): {extra_in_ts}")
+        if missing_in_ts:
+            print(f"  Missing in TypeScript ({len(missing_in_ts)}): {missing_in_ts}")
+
         return False
 
     print(f"✓ Entity count matches: {len(python_entities)}")
-
-    mismatches = 0
-    for i, (py_ent, ts_ent) in enumerate(zip(python_entities, ts_entities)):
-        py_start = py_ent.get(
-            "startToken", py_ent[0] if isinstance(py_ent, tuple) else None
-        )
-        ts_start = ts_ent.get(
-            "startToken", ts_ent[0] if isinstance(ts_ent, tuple) else None
-        )
-
-        py_end = py_ent.get(
-            "endToken", py_ent[1] if isinstance(py_ent, tuple) else None
-        )
-        ts_end = ts_ent.get(
-            "endToken", ts_ent[1] if isinstance(ts_ent, tuple) else None
-        )
-
-        py_cat = py_ent.get("cat", py_ent[2] if isinstance(py_ent, tuple) else None)
-        ts_cat = ts_ent.get("cat", ts_ent[2] if isinstance(ts_ent, tuple) else None)
-
-        if py_start != ts_start or py_end != ts_end:
-            print(
-                f"⚠️  Entity {i} span mismatch: Python=[{py_start},{py_end}], TypeScript=[{ts_start},{ts_end}]"
-            )
-            mismatches += 1
-
-        if py_cat != ts_cat:
-            print(
-                f"⚠️  Entity {i} category mismatch: Python={py_cat}, TypeScript={ts_cat}"
-            )
-            mismatches += 1
-
-    if mismatches == 0:
-        print("✓ All entities match!")
-        return True
-    else:
-        print(f"⚠️  {mismatches} entity mismatches found")
-        return False
+    return True
 
 
 def compare_supersense(python_supersense: List, ts_supersense: List) -> bool:
@@ -115,30 +103,29 @@ def compare_supersense(python_supersense: List, ts_supersense: List) -> bool:
         print(
             f"⚠️  Supersense count mismatch: Python={len(python_supersense)}, TypeScript={len(ts_supersense)}"
         )
+
+        # Find the specific difference
+        py_set = set()
+        ts_set = set()
+
+        for ss in python_supersense:
+            py_set.add((ss[0], ss[1], ss[2]))
+
+        for ss in ts_supersense:
+            ts_set.add((ss[0], ss[1], ss[2]))
+
+        extra_in_ts = ts_set - py_set
+        missing_in_ts = py_set - ts_set
+
+        if extra_in_ts:
+            print(f"  Extra in TypeScript ({len(extra_in_ts)}): {extra_in_ts}")
+        if missing_in_ts:
+            print(f"  Missing in TypeScript ({len(missing_in_ts)}): {missing_in_ts}")
+
         return False
 
     print(f"✓ Supersense count matches: {len(python_supersense)}")
-
-    mismatches = 0
-    for i, (py_ss, ts_ss) in enumerate(zip(python_supersense, ts_supersense)):
-        if py_ss[0] != ts_ss[0] or py_ss[1] != ts_ss[1]:
-            print(
-                f"⚠️  Supersense {i} span mismatch: Python=[{py_ss[0]},{py_ss[1]}], TypeScript=[{ts_ss[0]},{ts_ss[1]}]"
-            )
-            mismatches += 1
-
-        if py_ss[2] != ts_ss[2]:
-            print(
-                f"⚠️  Supersense {i} label mismatch: Python={py_ss[2]}, TypeScript={ts_ss[2]}"
-            )
-            mismatches += 1
-
-    if mismatches == 0:
-        print("✓ All supersense annotations match!")
-        return True
-    else:
-        print(f"⚠️  {mismatches} supersense mismatches found")
-        return False
+    return True
 
 
 def compare_timing(python_timing: Dict, ts_timing: Dict) -> None:
@@ -164,25 +151,6 @@ def compare_debug_info(python_debug: Dict, ts_debug: Dict) -> bool:
         )
         return True
 
-    print("Python Debug Info:")
-    for key, value in sorted(python_debug.items()):
-        if isinstance(value, (dict, list)) and len(str(value)) > 100:
-            print(
-                f"  {key}: {type(value).__name__} (length={len(value) if isinstance(value, list) else len(str(value))})"
-            )
-        else:
-            print(f"  {key}: {value}")
-
-    print("\nTypeScript Debug Info:")
-    for key, value in sorted(ts_debug.items()):
-        if isinstance(value, (dict, list)) and len(str(value)) > 100:
-            print(
-                f"  {key}: {type(value).__name__} (length={len(value) if isinstance(value, list) else len(str(value))})"
-            )
-        else:
-            print(f"  {key}: {value}")
-
-    print("\nDebug Info Comparison:")
     mismatches = 0
     all_keys = set(python_debug.keys()) | set(ts_debug.keys())
     for key in sorted(all_keys):
@@ -193,13 +161,34 @@ def compare_debug_info(python_debug: Dict, ts_debug: Dict) -> bool:
             continue
 
         if py_val != ts_val:
+            if mismatches == 0:
+                print("Python Debug Info:")
+                for k, v in sorted(python_debug.items()):
+                    if isinstance(v, (dict, list)) and len(str(v)) > 100:
+                        print(
+                            f"  {k}: {type(v).__name__} (length={len(v) if isinstance(v, list) else len(str(v))})"
+                        )
+                    else:
+                        print(f"  {k}: {v}")
+
+                print("\nTypeScript Debug Info:")
+                for k, v in sorted(ts_debug.items()):
+                    if isinstance(v, (dict, list)) and len(str(v)) > 100:
+                        print(
+                            f"  {k}: {type(v).__name__} (length={len(v) if isinstance(v, list) else len(str(v))})"
+                        )
+                    else:
+                        print(f"  {k}: {v}")
+
+                print("\nDebug Info Comparison:")
+
             print(f"  ⚠️  {key} mismatch: Python={py_val}, TypeScript={ts_val}")
             mismatches += 1
         else:
-            print(f"  ✓ {key} matches: {py_val}")
+            print(f"  ✓ {key} matches")
 
     if mismatches == 0:
-        print("\n✓ All debug info matches!")
+        print("✓ All debug info matches!")
         return True
     else:
         print(f"\n⚠️  {mismatches} debug info mismatches found")

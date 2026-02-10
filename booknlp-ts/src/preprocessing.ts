@@ -16,6 +16,11 @@ export class Tokenizer {
   private tokenizer: any;
   private initialized: boolean = false;
   private static environmentConfigured: boolean = false;
+  private vocab: Map<string, number> = new Map();
+  private unkTokenId: number = 100;
+  private clsTokenId: number = 101;
+  private sepTokenId: number = 102;
+  private maxInputCharsPerWord: number = 100;
 
   async initialize(modelId: string): Promise<void> {
     this.configureTransformersEnvironment();
@@ -23,7 +28,121 @@ export class Tokenizer {
     this.tokenizer = await AutoTokenizer.from_pretrained(normalizedModelId, {
       legacy: true
     });
+    await this.loadVocab(normalizedModelId);
+
+    // Manually add [CAP] as a special token to match Python behavior
+    // Python adds this with: self.tokenizer.add_tokens(["[CAP]"], special_tokens=True)
+    // Reference: booknlp/english/tagger.py
+    if (this.tokenizer.add_tokens && typeof this.tokenizer.add_tokens === 'function') {
+      console.warn('[Tokenizer] Calling add_tokens([CAP])...');
+      const result = this.tokenizer.add_tokens([SPECIAL_TOKENS.CAP], { special_tokens: true });
+      console.warn(`[Tokenizer] add_tokens returned: ${result}`);
+    } else {
+      console.warn('[Tokenizer] add_tokens method not available');
+    }
+
+    // Debug: decode token 30522 to see what it is
+    try {
+      const decoded = this.tokenizer.decode([30522]);
+      console.warn(`[Tokenizer] Token 30522 decodes to: "${decoded}"`);
+    } catch (e) {
+      console.warn(`[Tokenizer] Failed to decode token 30522: ${e}`);
+    }
+
     this.initialized = true;
+  }
+
+  private resolveVocabUrl(modelId: string): string {
+    if (modelId.startsWith('http://') || modelId.startsWith('https://')) {
+      return `${modelId.replace(/\/$/, '')}/vocab.txt`;
+    }
+
+    if (modelId.includes('/')) {
+      return `https://huggingface.co/${modelId}/resolve/main/vocab.txt`;
+    }
+
+    return `${modelId.replace(/\/$/, '')}/vocab.txt`;
+  }
+
+  private async loadVocab(modelId: string): Promise<void> {
+    const vocabUrl = this.resolveVocabUrl(modelId);
+    const response = await fetch(vocabUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to load vocab.txt from ${vocabUrl}`);
+    }
+
+    const text = await response.text();
+    const tokens = text.split(/\r?\n/);
+    this.vocab = new Map();
+    tokens.forEach((token, index) => {
+      if (token.length > 0) {
+        this.vocab.set(token, index);
+      }
+    });
+
+    const unkId = this.vocab.get('[UNK]');
+    const clsId = this.vocab.get('[CLS]');
+    const sepId = this.vocab.get('[SEP]');
+    if (unkId !== undefined) this.unkTokenId = unkId;
+    if (clsId !== undefined) this.clsTokenId = clsId;
+    if (sepId !== undefined) this.sepTokenId = sepId;
+  }
+
+  private wordpieceTokenize(text: string): string[] {
+    if (!text) {
+      return [];
+    }
+
+    const outputTokens: string[] = [];
+    const words = text.split(/\s+/).filter(Boolean);
+
+    for (const word of words) {
+      if (word.length > this.maxInputCharsPerWord) {
+        outputTokens.push('[UNK]');
+        continue;
+      }
+
+      let isBad = false;
+      let start = 0;
+      const subTokens: string[] = [];
+
+      while (start < word.length) {
+        let end = word.length;
+        let curSubstr: string | null = null;
+
+        while (start < end) {
+          let substr = word.slice(start, end);
+          if (start > 0) {
+            substr = `##${substr}`;
+          }
+          if (this.vocab.has(substr)) {
+            curSubstr = substr;
+            break;
+          }
+          end -= 1;
+        }
+
+        if (!curSubstr) {
+          isBad = true;
+          break;
+        }
+
+        subTokens.push(curSubstr);
+        start = end;
+      }
+
+      if (isBad) {
+        outputTokens.push('[UNK]');
+      } else {
+        outputTokens.push(...subTokens);
+      }
+    }
+
+    return outputTokens;
+  }
+
+  private tokensToIds(tokens: string[]): number[] {
+    return tokens.map(token => this.vocab.get(token) ?? this.unkTokenId);
   }
 
   private configureTransformersEnvironment(): void {
@@ -53,6 +172,61 @@ export class Tokenizer {
     if (!this.initialized) {
       throw new Error('BertTokenizer not initialized. Call initialize() first.');
     }
+  }
+
+  private prepareTokenText(text: string): string {
+    if (!text) {
+      return text;
+    }
+
+    const firstChar = text[0];
+    if (firstChar && firstChar.toLowerCase() !== firstChar) {
+      return `${SPECIAL_TOKENS.CAP} ${text.toLowerCase()}`;
+    }
+
+    return text;
+  }
+
+  private countCapTokensSeparately(text: string): number {
+    const firstChar = text[0];
+    const isCapitalized = firstChar && firstChar.toLowerCase() !== firstChar;
+
+    if (!isCapitalized) {
+      const tokens = this.wordpieceTokenize(text);
+      return tokens.length;
+    }
+
+    // Python registers [CAP] as a special token (ID 30522) via add_tokens().
+    // transformers.js doesn't support add_tokens(), so we count [CAP] manually as 1 token.
+    // Then count the lowercase word tokens separately.
+    // Reference: booknlp/english/tagger.py:80-81
+    const wordTokens = this.wordpieceTokenize(text.toLowerCase());
+    return 1 + wordTokens.length;  // [CAP] (1) + lowercase word tokens
+  }
+
+  debugEncodeToken(text: string): { prepared: string; ids: number[] } {
+    this.ensureInitialized();
+
+    const firstChar = text[0];
+    const isCapitalized = firstChar && firstChar.toLowerCase() !== firstChar;
+
+    if (isCapitalized) {
+      // Match actual tokenizeTokens behavior: [CAP] token (30522) + word tokens
+      const lowercased = text.toLowerCase();
+      const wordTokens = this.wordpieceTokenize(lowercased);
+      const wordIds = this.tokensToIds(wordTokens);
+      // Construct the IDs as tokenizeTokens would: [30522] followed by actual word tokens
+      const ids = [this.vocab.get('[CAP]') ?? 30522, ...wordIds];
+      const prepared = `[CAP] ${lowercased}`;
+      return { prepared, ids };
+    }
+
+    // Non-capitalized: encode as-is
+    const prepared = text;
+    const tokens = this.wordpieceTokenize(prepared);
+    const ids = this.tokensToIds(tokens);
+
+    return { prepared, ids };
   }
 
   tokenize(spaCyContext: SpaCyContext): BertTokenizationResult {
@@ -106,29 +280,46 @@ export class Tokenizer {
       });
     };
 
-    const clsEncoded = this.tokenizer.encode(SPECIAL_TOKENS.CLS, { add_special_tokens: false });
-    addEncodedTokens(clsEncoded, null, null);
+    addEncodedTokens({ ids: [this.clsTokenId], tokens: [SPECIAL_TOKENS.CLS] }, null, null);
 
     for (let i = 0; i < spaCyTokens.length; i++) {
       const token = spaCyTokens[i];
-      let tokenText = token.text;
+      const firstChar = token.text[0];
+      const isCapitalized = firstChar && firstChar.toLowerCase() !== firstChar;
 
-      // Mirror Python behavior (entity_tagger.py:110): prepend "[CAP] " to text before tokenization
-      // Preserve original casing unless we add the [CAP] marker (uncased BERT expects lowercase after it)
-      if (this.isCapitalized(token.text)) {
-        tokenText = `${SPECIAL_TOKENS.CAP} ${token.text.toLowerCase()}`;
+      if (isCapitalized) {
+        // Mirror Python: treat [CAP] as a single token, then tokenize the lowercase word.
+        const capStartIdx = tokenIds.length;
+        tokens.push(SPECIAL_TOKENS.CAP);
+        tokenIds.push(this.vocab.get('[CAP]') ?? 30522);
+        attentionMask.push(1);
+        subwordToTokenMap.push(i);
+
+        const lowercased = token.text.toLowerCase();
+        const wordTokens = this.wordpieceTokenize(lowercased);
+        const wordIds = this.tokensToIds(wordTokens);
+        for (let j = 0; j < wordIds.length; j++) {
+          tokens.push(wordTokens[j] ?? `[${wordIds[j]}]`);
+          tokenIds.push(wordIds[j]);
+          attentionMask.push(1);
+          subwordToTokenMap.push(i);
+        }
+
+        const capEndIdx = tokenIds.length;
+        subwordRanges.push({
+          start: capStartIdx,
+          end: capEndIdx,
+          tokenIdx: i,
+        });
+      } else {
+        // Normal tokenization for non-capitalized tokens
+        const wordTokens = this.wordpieceTokenize(token.text);
+        const wordIds = this.tokensToIds(wordTokens);
+        addEncodedTokens({ ids: wordIds, tokens: wordTokens }, i, i);
       }
-
-      const encoded = this.tokenizer.encode(tokenText, { add_special_tokens: false });
-      const normalized = normalizeEncoded(encoded);
-      const normalizedEncoded = normalized.ids.length > 0
-        ? encoded
-        : this.tokenizer.encode('[UNK]', { add_special_tokens: false });
-      addEncodedTokens(normalizedEncoded, i, i);
     }
 
-    const sepEncoded = this.tokenizer.encode(SPECIAL_TOKENS.SEP, { add_special_tokens: false });
-    addEncodedTokens(sepEncoded, null, null);
+    addEncodedTokens({ ids: [this.sepTokenId], tokens: [SPECIAL_TOKENS.SEP] }, null, null);
 
     if (tokens.length > MAX_SUBWORD_LENGTH) {
       tokens.splice(MAX_SUBWORD_LENGTH);
@@ -187,36 +378,9 @@ export class Tokenizer {
       return 0;
     }
 
-    // Mirror Python behavior: preserve original casing, except when using [CAP] marker
-    const textToTokenize = this.isCapitalized(text)
-      ? `${SPECIAL_TOKENS.CAP} ${text.toLowerCase()}`
-      : text;
-
-    const encoded = this.tokenizer.encode(textToTokenize, { add_special_tokens: false });
-
-    // Handle both formats: {ids: number[], tokens: string[]} or just number[]
-    let ids: number[];
-    if (Array.isArray(encoded)) {
-      ids = encoded;
-    } else if (encoded && encoded.ids && Array.isArray(encoded.ids)) {
-      ids = encoded.ids;
-    } else {
-      console.error('Tokenizer encode returned unexpected format:', encoded);
-      throw new Error(
-        `Tokenizer encode failed: expected {ids: number[], tokens: string[]} or number[], got ${JSON.stringify(encoded)}`
-      );
-    }
-
-    // Match Python behavior: return actual length, not Math.max(1, length)
-    // Python uses len(toks) which can be 0 for some edge cases
-    // Reference: booknlp/english/entity_tagger.py:116-126
-    return ids.length;
+    return this.countCapTokensSeparately(text);
   }
 
-  private isCapitalized(text: string): boolean {
-    if (text.length === 0) return false;
-    return text[0] === text[0].toUpperCase() && text[0] !== text[0].toLowerCase();
-  }
 }
 
 export function convertSpaCyToTokens(

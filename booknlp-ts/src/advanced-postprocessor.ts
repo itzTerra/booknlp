@@ -356,7 +356,12 @@ export class AdvancedPostProcessor {
       });
     }
 
-    return entities;
+    const punctuationPattern = /^[\p{P}\p{Z}]+$/u;
+    const filtered = entities.filter(
+      (ent) => !punctuationPattern.test((ent.text || '').trim())
+    );
+
+    return filtered;
   }
 
   /**
@@ -418,14 +423,16 @@ export class AdvancedPostProcessor {
   mergeEntityLayers(layer1: Entity[], layer2: Entity[], layer3: Entity[], tokens?: Token[]): Entity[] {
     const allEntitiesMap = new Map<string, Entity>();
 
-    // Deduplicate using global token ids to avoid collisions when a long sentence
-    // is split across batches (Python uses doc_idx for chunk identity).
-    // Python reference: booknlp/english/tagger.py:509-543 uses (doc_idx, label, start, end)
+    // Deduplicate using batch-local indices and entity type (nerCat).
+    // All three layers extract from the SAME batchTokens array during the same batch processing,
+    // so entities at identical (start, end, nerCat) positions are duplicates and should be deduplicated.
+    // This mimics Python's deduplication in tagger.py:520-536, which uses (doc_idx, label, idx, j)
+    // where doc_idx=sentence_index (batch-local), label=entity_type, idx=start, j=end.
+    // Since entities within a batch must deduplicate by span, we use (start, end, nerCat) as the key.
     const addEntities = (entities: Entity[]) => {
       for (const entity of entities) {
-        const startTokenId = tokens?.[entity.start]?.tokenId ?? entity.start;
-        const endTokenId = tokens?.[entity.end - 1]?.tokenId ?? entity.end;
-        const key = `${startTokenId}-${endTokenId}-${entity.nerCat}`;
+        // Deduplication key: (batch-local-start, batch-local-end, entity-type)
+        const key = `${entity.start}-${entity.end}-${entity.nerCat}`;
         if (!allEntitiesMap.has(key)) {
           allEntitiesMap.set(key, entity);
         }
@@ -446,7 +453,14 @@ export class AdvancedPostProcessor {
    * Extract supersense annotations from BIO-tagged sequence.
    *
    * Supersenses provide semantic role information (noun.person, verb.motion, etc.)
-   * Combines adjacent tags into spans with semantic category.
+   * Matches Python's _get_spans behavior (tagger.py:598-631):
+   * - B-tags start new spans
+   * - I-tags continue the current span ONLY if category matches
+   * - I-tags with different category or no current span close the span WITHOUT starting a new one
+   * - O tags close the current span
+   *
+   * CRITICAL: Python does NOT create new spans from I-tags with mismatched categories.
+   * These are treated as malformed BIO sequences and are ignored.
    *
    * @param tokens - Token objects
    * @param supersenseLabels - BIO tag strings for supersense layer
@@ -463,6 +477,7 @@ export class AdvancedPostProcessor {
       const label = supersenseLabels[i];
 
       if (label === 'O') {
+        // O tag closes current span
         if (currentSpan !== null) {
           annotations.push([
             currentSpan.start,
@@ -479,6 +494,7 @@ export class AdvancedPostProcessor {
         const [prefix, category] = label.split('-');
 
         if (prefix === 'B') {
+          // B tag always closes current span and starts a new one
           if (currentSpan !== null) {
             annotations.push([
               currentSpan.start,
@@ -491,10 +507,34 @@ export class AdvancedPostProcessor {
             ]);
           }
           currentSpan = { start: i, label: category };
+        } else if (prefix === 'I') {
+          // I tag behavior mirrors Python's _get_spans (tagger.py:617-626):
+          // - Continue span if category matches current span
+          // - Close span if category differs (malformed BIO) WITHOUT starting new span
+          // - Ignore if no current span (malformed BIO)
+          // Reference: Python breaks the while loop when parts_n[1] != parts[1]
+          if (currentSpan !== null) {
+            if (currentSpan.label !== category) {
+              // Close current span due to category mismatch, don't start new span
+              annotations.push([
+                currentSpan.start,
+                i,
+                currentSpan.label,
+                tokens
+                  .slice(currentSpan.start, i)
+                  .map((t) => t.text)
+                  .join(' '),
+              ]);
+              currentSpan = null;
+            }
+            // else: category matches, continue current span (no action needed)
+          }
+          // else: no current span (malformed BIO), ignore this I-tag
         }
       }
     }
 
+    // Close any remaining span at end of sequence
     if (currentSpan !== null) {
       annotations.push([
         currentSpan.start,

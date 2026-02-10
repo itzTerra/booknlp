@@ -136,6 +136,14 @@ class LitBankEntityTagger:
         # print(f"DEBUG PY: Created {len(sents)} sentence chunks after {split_count} splits")
         first_phase_count = len(sents)
 
+        # Calculate wordpiece lengths for each first-phase chunk for debugging
+        chunk_wordpiece_lengths = []
+        for sent in sents:
+            chunk_len = 0
+            for toks in sent:
+                chunk_len += len(toks)
+            chunk_wordpiece_lengths.append(chunk_len)
+
         sentences = []
         o_sentences = []
 
@@ -213,6 +221,50 @@ class LitBankEntityTagger:
 
         wn_batches = self._get_wn(batched_pos)
 
+        # Debug: Log basic WordNet batch structure for analysis
+        if debug_info is not None:
+            debug_info["wn_batches_count"] = len(wn_batches)
+            debug_info["wn_batches_shapes"] = [
+                (
+                    wn_batch.shape[0] if hasattr(wn_batch, "shape") else len(wn_batch),
+                    wn_batch.shape[1]
+                    if hasattr(wn_batch, "shape")
+                    else (len(wn_batch[0]) if len(wn_batch) > 0 else 0),
+                )
+                for wn_batch in wn_batches
+            ]
+
+            wn_batches_details = []
+            for i, (batch_pos_item, wn_batch) in enumerate(
+                zip(batched_pos, wn_batches)
+            ):
+                batch_token_count = 0
+                for sent in batch_pos_item:
+                    if sent is not None:
+                        for tok in sent:
+                            if tok is not None:
+                                batch_token_count += 1
+
+                wn_senses_length = (
+                    wn_batch.shape[1]
+                    if hasattr(wn_batch, "shape") and len(wn_batch.shape) > 1
+                    else (
+                        len(wn_batch[0])
+                        if len(wn_batch) > 0 and hasattr(wn_batch[0], "__len__")
+                        else 0
+                    )
+                )
+
+                wn_batches_details.append(
+                    {
+                        "batchTokenCount": batch_token_count,
+                        "batchSpaCyTokenCount": batch_token_count,
+                        "wnSensesLength": wn_senses_length,
+                    }
+                )
+
+            debug_info["wn_batches_details"] = wn_batches_details
+
         preds_in_order, events_in_order, supersense_preds_in_order = self.model.tag_all(
             wn_batches,
             batched_sents,
@@ -241,6 +293,9 @@ class LitBankEntityTagger:
             return_vals["entities"] = entities
 
         if doSS:
+            # Track supersense annotations at problematic positions for debugging
+            supersense_debug_positions = []
+
             for idx, preds in enumerate(supersense_preds_in_order):
                 for tmp, label, start, end in preds:
                     start_token = sents[idx][start].token_id
@@ -252,6 +307,39 @@ class LitBankEntityTagger:
                     supersense_entities.append(
                         (start_token, phraseEndToken, label, phrase)
                     )
+
+                    # Debug: Track problematic token ranges
+                    # Reference: TypeScript entity-tagger.ts debug ranges
+                    if (
+                        start_token
+                        in [
+                            26968,
+                            26969,
+                            26979,
+                            27033,
+                            27049,
+                            27186,
+                            27266,
+                            27286,
+                            30357,
+                            34811,
+                        ]
+                        or (26960 <= start_token <= 26990)
+                        or (27030 <= start_token <= 27060)
+                        or (27180 <= start_token <= 27300)
+                        or (30350 <= start_token <= 30365)
+                        or (34805 <= start_token <= 34820)
+                    ):
+                        supersense_debug_positions.append(
+                            {
+                                "start": start_token,
+                                "end": phraseEndToken,
+                                "category": label,
+                                "text": phrase,
+                            }
+                        )
+
+            debug_info["supersense_debug_positions"] = supersense_debug_positions
             return_vals["supersense"] = supersense_entities
 
         if doEvent:
@@ -269,6 +357,9 @@ class LitBankEntityTagger:
         debug_info["sentence_chunks_count"] = first_phase_chunks
         debug_info["sentence_groups_before_sort"] = sentence_groups_count
         debug_info["ordered_sentences_count"] = len(ordering)
+        debug_info["chunk_wordpiece_lengths"] = (
+            chunk_wordpiece_lengths  # First-phase chunk lengths for debugging
+        )
         debug_info["second_phase_group_lengths"] = group_lengths
         debug_info["second_phase_group_chunk_counts"] = group_chunk_counts
         debug_info["raw_batch_sample"] = {

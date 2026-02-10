@@ -41,7 +41,7 @@ async function processWithTypescriptBookNLP(
   const browser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-web-security', '--allow-running-insecure-content'],
-    protocolTimeout: 300000
+    protocolTimeout: 3000000
   });
 
   try {
@@ -86,7 +86,7 @@ async function processWithTypescriptBookNLP(
     await page.setContent(htmlContent);
 
     // Wait for validation to complete
-    await page.waitForFunction(() => window.validationResult !== undefined, { timeout: 300000 });
+    await page.waitForFunction(() => window.validationResult !== undefined, { timeout: 3000000 });
 
     const outputData = await page.evaluate(() => window.validationResult);
 

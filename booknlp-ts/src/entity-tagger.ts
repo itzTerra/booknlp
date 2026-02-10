@@ -211,6 +211,7 @@ export class EntityTagger {
       firstPhaseCount: firstPhaseChunks,
       secondPhaseGroupLengths,
       secondPhaseGroupChunkCounts,
+      chunkWordpieceLengths,
     } = this.createSentenceBatches(tokens, filteredSpaCyTokens);
 
     // Match Python: get_batches sorts by BERT token length before batching.
@@ -230,6 +231,8 @@ export class EntityTagger {
     const allEntityAnnotations: EntityAnnotation[] = [];
     const allSupersenseAnnotations: SupersenseAnnotation[] = [];
     const allEvents = new Set<number>();
+    const debugWordNetBatches: any[] = [];
+    const debugWordNetBatchShapes: Array<[number, number]> = [];
 
     let batchCount = 0;
     let batchIdx = 0;
@@ -241,8 +244,18 @@ export class EntityTagger {
       const batchSlice = orderedSentences.slice(batchIdx, batchEnd);
       const batchMaxLen = Math.max(...batchSlice.map(item => item.length));
       const batchInputs = batchSlice.map(item => item.batch);
-
+      // Debug: Collect WordNet sense batch information before inference
+      for (const batch of batchInputs) {
+        debugWordNetBatches.push({
+          batchTokenCount: batch.tokens.length,
+          batchSpaCyTokenCount: batch.spaCyTokens.length,
+          wnSensesLength: batch.spaCyTokens.length + 2,  // [CLS] + tokens + [SEP]
+        });
+      }
       const batchResults = await this.processSentenceBatch(batchInputs);
+      if (batchResults._debug?.wnBatchShape) {
+        debugWordNetBatchShapes.push(batchResults._debug.wnBatchShape);
+      }
       batchCount++;
 
       if (batchResults.entities) {
@@ -273,6 +286,7 @@ export class EntityTagger {
     // Reference: booknlp/english/entity_tagger.py:256
     const debugInfo: Record<string, any> = {
       batches_count: batchCount,
+      chunk_wordpiece_lengths: chunkWordpieceLengths,
       first_phase_chunks: firstPhaseChunks,
       second_phase_groups: secondPhaseGroups,
       sentence_groups_before_sort: preGroupCount,
@@ -282,6 +296,23 @@ export class EntityTagger {
       second_phase_group_chunk_counts: secondPhaseGroupChunkCounts,
       extracted_entities_count: allEntityAnnotations.length,
       extracted_supersense_count: allSupersenseAnnotations.length,
+      wn_batches_count: debugWordNetBatches.length,
+      wn_batches_shapes: debugWordNetBatchShapes,
+      wn_batches_details: debugWordNetBatches,
+      // Debug: Supersense annotations at problematic positions
+      supersense_debug_positions: allSupersenseAnnotations
+        .filter(ann => {
+          const tokenId = ann[0];
+          return [
+            26968, 26969, 26979, 27033, 27049, 27186, 27266, 27286, 30357, 34811
+          ].includes(tokenId) ||
+          (tokenId >= 26960 && tokenId <= 26990) ||
+          (tokenId >= 27030 && tokenId <= 27060) ||
+          (tokenId >= 27180 && tokenId <= 27300) ||
+          (tokenId >= 30350 && tokenId <= 30365) ||
+          (tokenId >= 34805 && tokenId <= 34820);
+        })
+        .map(ann => ({ start: ann[0], end: ann[1], category: ann[2], text: ann[3] })),
     };
 
     return {
@@ -300,9 +331,10 @@ export class EntityTagger {
     firstPhaseCount: number;
     secondPhaseGroupLengths: number[];
     secondPhaseGroupChunkCounts: number[];
+    chunkWordpieceLengths: number[];
   } {
     const maxSequenceLength = 500;
-    const sentenceChunks: Array<{ tokens: Token[]; spaCyTokens: SpaCyToken[]; length: number }> = [];
+    const sentenceChunks: Array<{ tokens: Token[]; spaCyTokens: SpaCyToken[] }> = [];
 
     let currentSentenceTokens: Token[] = [];
     let currentSentenceSpaCy: SpaCyToken[] = [];
@@ -322,7 +354,6 @@ export class EntityTagger {
         sentenceChunks.push({
           tokens: currentSentenceTokens,
           spaCyTokens: currentSentenceSpaCy,
-          length: currentLength,
         });
         splitCount++;
         currentSentenceTokens = [];
@@ -332,7 +363,8 @@ export class EntityTagger {
 
       currentSentenceTokens.push(token);
       currentSentenceSpaCy.push(spaCyToken);
-      currentLength = Math.floor(currentLength + tokenLength);  // Ensure integer arithmetic
+      // tokenLength is already an integer from countTokens, no Math.floor needed
+      currentLength += tokenLength;
       lastSentenceId = token.sentenceId;
     }
 
@@ -340,13 +372,17 @@ export class EntityTagger {
       sentenceChunks.push({
         tokens: currentSentenceTokens,
         spaCyTokens: currentSentenceSpaCy,
-        length: Math.floor(currentLength),  // Ensure integer
       });
     }
     // Debug: sentenceChunks.length should equal splitCount + 1 (splits + final append)
     // console.log(`DEBUG TS: Created ${sentenceChunks.length} sentence chunks after ${splitCount} splits`);
     const firstPhaseCount = sentenceChunks.length;
+    // Phase 2: Group phase-1 chunks into batches, recalculating wordpiece lengths
+    // Python does this in entity_tagger.py:150-187, recalculating lengths fresh for each chunk
+    // Reference: booknlp/english/entity_tagger.py:151-153
+    const chunkWordpieceLengths: number[] = [];
 
+    // Batches for ONNX inference - don't need wordpieceLength after phase 2 grouping
     const batches: Array<{ tokens: Token[]; spaCyTokens: SpaCyToken[] }> = [];
     let combinedTokens: Token[] = [];
     let combinedSpaCy: SpaCyToken[] = [];
@@ -356,41 +392,77 @@ export class EntityTagger {
     const secondPhaseGroupChunkCounts: number[] = [];
 
     for (const chunk of sentenceChunks) {
-      // Recalculate chunk length to match Python's approach in phase 2
-      // Python iterates through stored tokens and counts them fresh
-      // Reference: booknlp/english/entity_tagger.py:151-153
+      // Recalculate chunk wordpiece length in phase 2, exactly like Python does
+      // Python doesn't store lengths from phase 1; it calculates them fresh when grouping
+      // Reference: booknlp/english/entity_tagger.py:159-162
       const chunkLength = this.calculateChunkWordpieceLength(chunk.spaCyTokens);
+      // Store for debug output
+      chunkWordpieceLengths.push(chunkLength);
 
-      // Match Python: split when adding chunk would exceed limit, regardless of current batch state.
-      // When the first chunk already exceeds the limit, Python emits an empty [CLS]/[SEP] group.
-      // Reference: booknlp/english/entity_tagger.py:147-161
-      if (combinedLength + chunkLength >= maxSequenceLength) {
-        if (combinedTokens.length > 0) {
-          batches.push({
-            tokens: combinedTokens,
-            spaCyTokens: combinedSpaCy,
-          });
-        } else {
-          batches.push({
-            tokens: [],
-            spaCyTokens: [],
-          });
+      // Debug: Log when chunk wordpiece length differs from expected Python values
+      // Known Python values for indices 9, 20, 36-37, 84, 113...
+      const chunkIdx = chunkWordpieceLengths.length - 1;
+      if (chunkIdx < 150) {
+        // Log details of the chunk for the first significant mismatches
+        const pythonExpected: Record<number, number> = {
+          9: 26,  // TS has 30 (+4)
+          20: 80, // TS has 84 (+4)
+          36: 57, // TS has 61 (+4)
+          37: 42, // TS has 50 (+8)
+          84: 66, // TS has 70 (+4)
+          113: 21, // TS has 25 (+4)
+          130: 36, // TS has 44 (+8)
+        };
+
+        if (pythonExpected[chunkIdx] && chunkLength !== pythonExpected[chunkIdx]) {
+          console.log(`CHUNK ${chunkIdx} LENGTH MISMATCH: Expected=${pythonExpected[chunkIdx]}, Got=${chunkLength}, Diff=${chunkLength - pythonExpected[chunkIdx]}`);
+          console.log(`  Chunk has ${chunk.spaCyTokens.length} spaCy tokens`);
+
+          // Show token counts for ALL tokens
+          const tokenCounts = chunk.spaCyTokens.map((t, i) => ({
+            idx: i,
+            text: t.text,
+            count: this.tokenizer.countTokens(t.text)
+          }));
+          console.log(`  All ${tokenCounts.length} token counts: ${JSON.stringify(tokenCounts)}`);
         }
+      }
+
+      // Match Python: check if adding this chunk would exceed limit
+      // Python: if sent_len + cur_length >= max_sentence_length
+      // Reference: booknlp/english/entity_tagger.py:164
+      if (chunkLength + combinedLength >= maxSequenceLength) {
+        // Emit current group before adding this chunk
+        // Python always appends sentence here, even if just [CLS][SEP]
+        // Reference: booknlp/english/entity_tagger.py:165-171
+        batches.push({
+          tokens: combinedTokens,
+          spaCyTokens: combinedSpaCy,
+        });
         secondPhaseGroupLengths.push(combinedLength);
         secondPhaseGroupChunkCounts.push(groupChunkCount);
+        // Reset for new group (Python sets sentence = [["[CLS]"]])
         combinedTokens = [];
         combinedSpaCy = [];
         combinedLength = 0;
         groupChunkCount = 0;
       }
 
+      // Add chunk to current group AFTER the split check
+      // Python: cur_length += sent_len (line 176), then sentence.extend(sent) (line 179)
+      // Reference: booknlp/english/entity_tagger.py:176-179
+      combinedLength += chunkLength;
+      groupChunkCount += 1;
       combinedTokens.push(...chunk.tokens);
       combinedSpaCy.push(...chunk.spaCyTokens);
-      combinedLength += chunkLength;  // Use recalculated length
-      groupChunkCount += 1;
     }
 
-    if (combinedTokens.length > 0) {
+    // Final append: match Python's check for len(sentence) > 1
+    // Python  sentence starts as [["[CLS]"]], so len > 1 means chunks were added
+    // TypeScript combinedTokens starts empty, so length > 0 means chunks were added with tokens
+    // BUT: we need to match Python's behavior of counting CHUNKS, not tokens
+    // Reference: booknlp/english/entity_tagger.py:182-187
+    if (groupChunkCount > 0) {
       batches.push({
         tokens: combinedTokens,
         spaCyTokens: combinedSpaCy,
@@ -402,6 +474,7 @@ export class EntityTagger {
     return {
       batches,
       firstPhaseCount,
+      chunkWordpieceLengths,
       secondPhaseGroupLengths,
       secondPhaseGroupChunkCounts,
     };
@@ -433,6 +506,9 @@ export class EntityTagger {
     entities?: EntityAnnotation[];
     supersense?: SupersenseAnnotation[];
     events?: Set<number>;
+    _debug?: {
+      wnBatchShape?: [number, number];
+    };
   }> {
     const maxSequenceLength = 500;
 
@@ -463,6 +539,9 @@ export class EntityTagger {
       entities: allEntities,
       supersense: allSupersense,
       events: allEvents,
+      _debug: singleBatchResults.wnBatchShape
+        ? { wnBatchShape: singleBatchResults.wnBatchShape }
+        : undefined,
     };
   }
 
@@ -473,6 +552,7 @@ export class EntityTagger {
     entities?: EntityAnnotation[];
     supersense?: SupersenseAnnotation[];
     events?: Set<number>;
+    wnBatchShape?: [number, number];
   }> {
 
     const allInputIds: number[][] = [];
@@ -518,6 +598,7 @@ export class EntityTagger {
 
     const paddedWordpieceLen = Math.ceil(maxSeqLen / 8) * 8;
     const paddedOriginalLen = Math.ceil(maxOriginalTokens / 8) * 8;
+    const paddedTagSeqLen = paddedOriginalLen - 1;
 
     for (let i = 0; i < allInputIds.length; i++) {
       while (allInputIds[i].length < paddedWordpieceLen) {
@@ -544,6 +625,8 @@ export class EntityTagger {
     const identityMatrix = this.createIdentityMatrix(paddedOriginalLen, paddedOriginalLen);
     const identityMatrices = batches.map(() => identityMatrix);
 
+    const wnBatchShape: [number, number] = [allWordnetSenses.length, paddedOriginalLen];
+
     const logitsPass1 = await this.controller.predict(
       allInputIds,
       allAttentionMask,
@@ -556,16 +639,15 @@ export class EntityTagger {
     );
 
     const entityLogits1 = logitsPass1.entityLogits1;
-    const entityLogits2 = logitsPass1.entityLogits2;
-    const entityLogits3 = logitsPass1.entityLogits3;
     const supersenseLogits = logitsPass1.supersenseLogits;
     const eventLogits = logitsPass1.eventLogits;
 
-    if (!entityLogits1 || !entityLogits2 || !entityLogits3) {
+    if (!entityLogits1) {
       return {
         entities: [],
         supersense: [],
         events: new Set<number>(),
+        wnBatchShape,
       };
     }
 
@@ -574,33 +656,82 @@ export class EntityTagger {
 
     for (let i = 0; i < batches.length; i++) {
       const tokenCount = tokenCounts[i];
-      const effectiveSeqLen = Math.min(tokenCount + 1, paddedOriginalLen - 1);
 
       const entityViterbi1 = this.crfDecoder.decodeEntity(
         [entityLogits1[i]],
         [tokenCount]
       );
-      const entities1Indices = entityViterbi1.paths[0].slice(0, tokenCount);
+      const entities1Indices = entityViterbi1.paths[0];
       const layer1Transform = this.advancedPostProcessor.computeLayerTransformationFromIndices(
         entities1Indices,
-        effectiveSeqLen
+        paddedTagSeqLen
       );
       layer1Transforms.push(layer1Transform);
+    }
+
+    const layer1Matrices = layer1Transforms.map((transform) =>
+      this.embedMatrix(transform.matrix, paddedOriginalLen)
+    );
+
+    const logitsPass2 = await this.controller.predict(
+      allInputIds,
+      allAttentionMask,
+      allTransformMatrices,
+      layer1Matrices,
+      identityMatrices,
+      allWordnetSenses,
+      [],
+      paddedOriginalLen
+    );
+
+    const entityLogits2 = logitsPass2.entityLogits2;
+
+    if (!entityLogits2) {
+      return {
+        entities: [],
+        supersense: [],
+        events: new Set<number>(),
+      };
+    }
+
+    for (let i = 0; i < batches.length; i++) {
+      const layer1Transform = layer1Transforms[i];
 
       const entityViterbi2 = this.crfDecoder.decodeEntity(
         [entityLogits2[i]],
-        [tokenCount]
+        [layer1Transform.len]
       );
-      const entities2IndicesRaw = entityViterbi2.paths[0].slice(0, tokenCount);
-      const entities2TagsFixed = this.advancedPostProcessor.fixBIOTags(
-        this.advancedPostProcessor.convertIndicesToTags(entities2IndicesRaw, this.entityTagset)
-      );
-      let entities2Indices = this.advancedPostProcessor.convertTagsToIndices(entities2TagsFixed);
+      const entities2IndicesRaw = entityViterbi2.paths[0];
       const layer2Transform = this.advancedPostProcessor.computeLayerTransformationFromIndices(
-        entities2Indices,
-        effectiveSeqLen
+        entities2IndicesRaw,
+        paddedTagSeqLen
       );
       layer2Transforms.push(layer2Transform);
+    }
+
+    const layer2Matrices = layer2Transforms.map((transform) =>
+      this.embedMatrix(transform.matrix, paddedOriginalLen)
+    );
+
+    const logitsPass3 = await this.controller.predict(
+      allInputIds,
+      allAttentionMask,
+      allTransformMatrices,
+      layer1Matrices,
+      layer2Matrices,
+      allWordnetSenses,
+      [],
+      paddedOriginalLen
+    );
+
+    const entityLogits3 = logitsPass3.entityLogits3;
+
+    if (!entityLogits3) {
+      return {
+        entities: [],
+        supersense: [],
+        events: new Set<number>(),
+      };
     }
 
     const allEntities: EntityAnnotation[] = [];
@@ -611,7 +742,6 @@ export class EntityTagger {
       const batch = batches[i];
       const batchTokens = batch.tokens;
       const tokenCount = tokenCounts[i];
-      const effectiveSeqLen = Math.min(tokenCount + 1, paddedOriginalLen - 1);
       const layer1Transform = layer1Transforms[i];
       const layer2Transform = layer2Transforms[i];
 
@@ -637,7 +767,7 @@ export class EntityTagger {
           [entityLogits3[i]],
           [layer2Transform.len]
         );
-        const entities3IndicesRaw = entityViterbi3.paths[0].slice(0, layer2Transform.len);
+        const entities3IndicesRaw = entityViterbi3.paths[0];
         const entities3TagsFixed = this.advancedPostProcessor.fixBIOTags(
           this.advancedPostProcessor.convertIndicesToTags(entities3IndicesRaw, this.entityTagset)
         );
@@ -676,13 +806,17 @@ export class EntityTagger {
         const entities2ForExtraction = entities2Tags.slice(0, tokenCount);
         const entities3ForExtraction = entities3Tags.slice(0, tokenCount);
 
-        // Extract entity spans from each layer's BIO tags
+        // Extract entity spans from each layer's BIO tags.
+        // Python passes length = original_tokens + 2 and slices tags[:length - 2],
+        // which equals the original token count. Our tag sequences already align
+        // to original tokens, so no extra truncation is needed.
         const entities1 = this.advancedPostProcessor.extractEntitiesFromBIO(entities1ForExtraction, batchTokens);
         const entities2 = this.advancedPostProcessor.extractEntitiesFromBIO(entities2ForExtraction, batchTokens);
         const entities3 = this.advancedPostProcessor.extractEntitiesFromBIO(entities3ForExtraction, batchTokens);
 
         // Merge entities across 3 layers, deduplicating spans and keeping best predictions
         const mergedEntities = this.advancedPostProcessor.mergeEntityLayers(entities1, entities2, entities3);
+
         const typedEntities = this.advancedPostProcessor.assignEntityTypes(mergedEntities, this.entityCategoryMap);
 
         typedEntities.forEach(entity => {
@@ -712,6 +846,37 @@ export class EntityTagger {
           this.supersenseTagset
         );
         const fixedSupersense = this.advancedPostProcessor.fixBIOTags(supersenseTags);
+
+        // Debug: Log tag sequences for problematic token ranges
+        // Reference: Python's _get_spans in tagger.py:598-631
+        const debugRanges = [
+          { start: 26960, end: 26990, name: 'Range 26960-26990 (verb.motion/stative issue)' },
+          { start: 27030, end: 27060, name: 'Range 27030-27060 (noun.person span issue)' },
+          { start: 27180, end: 27300, name: 'Range 27180-27300 (noun.communication/substance/attribute issues)' },
+          { start: 30350, end: 30365, name: 'Range 30350-30365 (noun.event issue)' },
+          { start: 34805, end: 34820, name: 'Range 34805-34820 (verb.cognition/possession issue)' },
+        ];
+
+        for (const range of debugRanges) {
+          const globalStartToken = batchTokens[0]?.tokenId ?? 0;
+          const globalEndToken = batchTokens[tokenCount - 1]?.tokenId ?? 0;
+
+          if (globalStartToken <= range.end && globalEndToken >= range.start) {
+            const localStart = Math.max(0, range.start - globalStartToken);
+            const localEnd = Math.min(tokenCount, range.end - globalStartToken + 1);
+
+            if (localStart < tokenCount && localEnd > 0) {
+              console.log(`\n[DEBUG Supersense] ${range.name}`);
+              console.log(`  Batch tokens ${globalStartToken} to ${globalEndToken}`);
+              console.log(`  Local indices ${localStart} to ${localEnd}`);
+              console.log(`  Raw tags: ${supersenseTags.slice(localStart, localEnd).join(', ')}`);
+              console.log(`  Fixed tags: ${fixedSupersense.slice(localStart, localEnd).join(', ')}`);
+              console.log(`  Token IDs: ${batchTokens.slice(localStart, localEnd).map(t => t.tokenId).join(', ')}`);
+              console.log(`  Token texts: ${batchTokens.slice(localStart, localEnd).map(t => t.text).join(' ')}`);
+            }
+          }
+        }
+
         const supersenseAnnotations = this.advancedPostProcessor.applySupersenseAnnotations(
           batchTokens,
           fixedSupersense
@@ -765,6 +930,7 @@ export class EntityTagger {
       entities: allEntities,
       supersense: allSupersense,
       events: allEvents,
+      wnBatchShape,
     };
   }
 

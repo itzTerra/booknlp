@@ -77,7 +77,7 @@ def process_with_python_booknlp(text: str, output_file: str):
 
 
 if __name__ == "__main__":
-    input_file = Path(__file__).parent / "158_emma_cut.txt"
+    input_file = Path(__file__).parent / "158_emma.txt"
 
     with open(input_file, "r", encoding="utf-8") as f:
         test_text = f.read()
