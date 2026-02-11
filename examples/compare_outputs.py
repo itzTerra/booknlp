@@ -208,11 +208,8 @@ def main():
         print(f"❌ TypeScript output not found: {ts_output}")
         sys.exit(1)
 
-    print("Loading outputs...")
     py_data = load_json(str(python_output))
     ts_data = load_json(str(ts_output))
-
-    print(f"\nInput text: {py_data['input_text'][:100]}...")
 
     all_match = True
 

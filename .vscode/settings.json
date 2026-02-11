@@ -5,6 +5,10 @@
         "/^uv run compare_outputs\\.py$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^cd /home/terra/Projects/booknlp/examples && uv run compare_outputs\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

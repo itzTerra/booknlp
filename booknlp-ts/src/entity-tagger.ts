@@ -216,10 +216,14 @@ export class EntityTagger {
 
     // Match Python: get_batches sorts by BERT token length before batching.
     // Reference: booknlp/common/layered_reader.py:107-140
+    const sentenceLengths = sentenceBatches.map((batch) =>
+      this.estimateSentenceLength(batch.spaCyTokens)
+    );
     const orderedSentences = sentenceBatches
-      .map((batch) => ({
+      .map((batch, index) => ({
         batch,
-        length: this.estimateSentenceLength(batch.spaCyTokens),
+        length: sentenceLengths[index],
+        index,
       }))
       .sort((a, b) => a.length - b.length);
 
@@ -238,24 +242,51 @@ export class EntityTagger {
     let batchIdx = 0;
     let currentBatchSize = maxBatchSize;
 
+    // Debug: Track batching behavior to match Python's adaptive batching
+    // Python adaptively reduces batch size when sequence length exceeds thresholds
+    // Reference: booknlp/common/layered_reader.py:318-325
+    let debugBatchSizes: number[] = [];
+
     while (batchIdx < orderedSentences.length) {
       const batchSizeUsed = currentBatchSize;
       const batchEnd = Math.min(batchIdx + batchSizeUsed, orderedSentences.length);
       const batchSlice = orderedSentences.slice(batchIdx, batchEnd);
       const batchMaxLen = Math.max(...batchSlice.map(item => item.length));
       const batchInputs = batchSlice.map(item => item.batch);
-      // Debug: Collect WordNet sense batch information before inference
+
+      // Debug: Record actual batch size used
+      debugBatchSizes.push(batchSlice.length);
+
+      // Debug: Collect WordNet sense batch information ONCE per ONNX inference batch
+      // Match Python: _get_wn() creates one wn_batch per ONNX batch (not per phase-2 group)
+      // Python iterates through batched_pos (74 items for 470 sentences), creating 74 wn_batches
+      // Reference: booknlp/english/entity_tagger.py:49-89, booknlp/english/entity_tagger.py:222
+      let batchTokenCount = 0;
+      let batchSpaCyTokenCount = 0;
+      let maxOriginalTokens = 0;
+
       for (const batch of batchInputs) {
-        debugWordNetBatches.push({
-          batchTokenCount: batch.tokens.length,
-          batchSpaCyTokenCount: batch.spaCyTokens.length,
-          wnSensesLength: batch.spaCyTokens.length + 2,  // [CLS] + tokens + [SEP]
-        });
+        batchTokenCount += batch.tokens.length;
+        batchSpaCyTokenCount += batch.spaCyTokens.length;
+        // Calculate max original token count (before BERT tokenization) across all sentences
+        // Matches processSingleBatch: originalTokenCount = batch.tokens.length + 2 ([CLS] + tokens + [SEP])
+        // Reference: booknlp-ts/src/entity-tagger.ts:579
+        const originalTokenCount = batch.spaCyTokens.length + 2;
+        maxOriginalTokens = Math.max(maxOriginalTokens, originalTokenCount);
       }
+
+      const wnSensesLength = maxOriginalTokens;
+      debugWordNetBatches.push({
+        batchTokenCount,
+        batchSpaCyTokenCount,
+        wnSensesLength,
+      });
+
+      // Match Python: wn_batches_shapes uses unpadded max sentence length from _get_wn
+      // Reference: booknlp/english/entity_tagger.py:49-89
+      debugWordNetBatchShapes.push([batchInputs.length, wnSensesLength]);
+
       const batchResults = await this.processSentenceBatch(batchInputs);
-      if (batchResults._debug?.wnBatchShape) {
-        debugWordNetBatchShapes.push(batchResults._debug.wnBatchShape);
-      }
       batchCount++;
 
       if (batchResults.entities) {
@@ -292,6 +323,9 @@ export class EntityTagger {
       sentence_groups_before_sort: preGroupCount,
       sentence_chunks_count: firstPhaseChunks,  // First phase chunks, not second phase groups
       ordered_sentences_count: postSortCount,
+      sentence_lengths: sentenceLengths,
+      ordering: orderedSentences.map((entry) => entry.index),
+      ordered_sentence_lengths: orderedSentences.map((entry) => entry.length),
       second_phase_group_lengths: secondPhaseGroupLengths,
       second_phase_group_chunk_counts: secondPhaseGroupChunkCounts,
       extracted_entities_count: allEntityAnnotations.length,
@@ -299,6 +333,8 @@ export class EntityTagger {
       wn_batches_count: debugWordNetBatches.length,
       wn_batches_shapes: debugWordNetBatchShapes,
       wn_batches_details: debugWordNetBatches,
+      debug_batch_sizes: debugBatchSizes,
+      debug_batch_sizes_sum: debugBatchSizes.reduce((a, b) => a + b, 0),
       // Debug: Supersense annotations at problematic positions
       supersense_debug_positions: allSupersenseAnnotations
         .filter(ann => {

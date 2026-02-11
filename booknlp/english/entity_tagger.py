@@ -187,6 +187,13 @@ class LitBankEntityTagger:
 
         sents = o_sentences
 
+        sentence_lengths = []
+        for sent in sentences:
+            sent_len = 0
+            for toks in sent:
+                sent_len += len(toks)
+            sentence_lengths.append(sent_len)
+
         # Debug: Track sentence grouping before batching
         sentence_groups_count = len(sentences)
         first_phase_chunks = first_phase_count
@@ -264,6 +271,13 @@ class LitBankEntityTagger:
                 )
 
             debug_info["wn_batches_details"] = wn_batches_details
+            debug_info["debug_batch_sizes"] = [len(batch) for batch in batched_pos]
+            debug_info["debug_batch_sizes_sum"] = sum(debug_info["debug_batch_sizes"])
+            debug_info["sentence_lengths"] = sentence_lengths
+            debug_info["ordering"] = ordering.tolist()
+            debug_info["ordered_sentence_lengths"] = [
+                sentence_lengths[idx] for idx in ordering
+            ]
 
         preds_in_order, events_in_order, supersense_preds_in_order = self.model.tag_all(
             wn_batches,
