@@ -297,71 +297,77 @@ export class AdvancedPostProcessor {
    * @param tokens - Token objects with text and position info
    * @returns Array of extracted entities
    */
+  /**
+   * Extract entity spans from BIO-tagged sequence.
+   *
+   * Matches Python's entity extraction behavior (tagger.py):
+   * - ONLY creates entities starting from B- tags
+   * - Continues with I- tags of matching category
+   * - Stops when encountering B-, O, or mismatched I- tags
+   * - Crucially: Orphan I- tags (not preceded by B-) are IGNORED
+   * - Does NOT create entities from orphan I- tags (unlike some BIO decoders)
+   *
+   * Reference: Python code tagger.py iterates only when tag.startswith("B-")
+   *
+   * @param tags - BIO tag strings
+   * @param tokens - Token objects
+   * @returns Array of Entity objects {start, end, nerCat, text}
+   */
   extractEntitiesFromBIO(tags: string[], tokens: Token[]): Entity[] {
     const entities: Entity[] = [];
-    let currentEntity: {
-      start: number;
-      type: string;
-    } | null = null;
 
     for (let i = 0; i < tags.length; i++) {
       const tag = tags[i];
 
-      if (tag === 'O') {
-        if (currentEntity !== null) {
-          entities.push({
-            start: currentEntity.start,
-            end: i,
-            nerCat: currentEntity.type,
-            text: tokens
-              .slice(currentEntity.start, i)
-              .map((t) => t.text)
-              .join(' '),
-          });
-          currentEntity = null;
-        }
-      } else {
-        const [prefix, type] = tag.split('-');
+      // ONLY process B- tags as entity starts, matching Python's strict behavior
+      if (tag.startsWith('B-')) {
+        const [, type] = tag.split('-');
+        let j = i + 1;
 
-        if (prefix === 'B') {
-          if (currentEntity !== null) {
-            entities.push({
-              start: currentEntity.start,
-              end: i,
-              nerCat: currentEntity.type,
-              text: tokens
-                .slice(currentEntity.start, i)
-                .map((t) => t.text)
-                .join(' '),
-            });
+        // Extend entity while seeing matching I- tags
+        while (j < tags.length) {
+          const nextTag = tags[j];
+
+          // Stop if B- or O tag encountered
+          if (nextTag.startsWith('B-') || nextTag === 'O') {
+            break;
           }
-          currentEntity = { start: i, type };
-        } else if (prefix === 'I') {
-          if (currentEntity === null || currentEntity.type !== type) {
-            currentEntity = { start: i, type };
+
+          // For I- tags, check if category matches
+          if (nextTag.startsWith('I-')) {
+            const [, nextType] = nextTag.split('-');
+            if (nextType !== type) {
+              // Category mismatch - stop extending entity
+              break;
+            }
+            // Category matches, continue
+            j++;
+          } else {
+            // Unexpected tag format, stop
+            break;
           }
+        }
+
+        // Create entity with span from i to j (exclusive end)
+        const entity: Entity = {
+          start: i,
+          end: j,
+          nerCat: type,
+          text: tokens
+            .slice(i, j)
+            .map((t) => t.text)
+            .join(' '),
+        };
+
+        // Filter out punctuation-only entities (matching Python behavior)
+        const punctuationPattern = /^[\p{P}\p{Z}]+$/u;
+        if (!punctuationPattern.test((entity.text || '').trim())) {
+          entities.push(entity);
         }
       }
     }
 
-    if (currentEntity !== null) {
-      entities.push({
-        start: currentEntity.start,
-        end: tags.length,
-        nerCat: currentEntity.type,
-        text: tokens
-          .slice(currentEntity.start)
-          .map((t) => t.text)
-          .join(' '),
-      });
-    }
-
-    const punctuationPattern = /^[\p{P}\p{Z}]+$/u;
-    const filtered = entities.filter(
-      (ent) => !punctuationPattern.test((ent.text || '').trim())
-    );
-
-    return filtered;
+    return entities;
   }
 
   /**
@@ -452,15 +458,19 @@ export class AdvancedPostProcessor {
   /**
    * Extract supersense annotations from BIO-tagged sequence.
    *
-   * Supersenses provide semantic role information (noun.person, verb.motion, etc.)
    * Matches Python's _get_spans behavior (tagger.py:598-631):
-   * - B-tags start new spans
-   * - I-tags continue the current span ONLY if category matches
-   * - I-tags with different category or no current span close the span WITHOUT starting a new one
-   * - O tags close the current span
+   * - ONLY creates spans starting from B- tags
+   * - Continues with I- tags of matching category
+   * - Stops when encountering B-, O, or mismatched I- tags
+   * - Crucially: Orphan I- tags (not preceded by matching B-) are IGNORED
    *
-   * CRITICAL: Python does NOT create new spans from I-tags with mismatched categories.
-   * These are treated as malformed BIO sequences and are ignored.
+   * This differs from standard BIO extraction where orphan I- tags might be
+   * handled specially. Python strictly only processes B- tags as span starts.
+   *
+   * Reference: Python code tagger.py:598-631
+   * - Iterates only when tag.startswith("B-")
+   * - Creates span key and adds to entities dict
+   * - No special handling for orphan I- tags
    *
    * @param tokens - Token objects
    * @param supersenseLabels - BIO tag strings for supersense layer
@@ -471,80 +481,51 @@ export class AdvancedPostProcessor {
     supersenseLabels: string[]
   ): Array<[number, number, string, string]> {
     const annotations: Array<[number, number, string, string]> = [];
-    let currentSpan: { start: number; label: string } | null = null;
 
     for (let i = 0; i < supersenseLabels.length; i++) {
       const label = supersenseLabels[i];
 
-      if (label === 'O') {
-        // O tag closes current span
-        if (currentSpan !== null) {
-          annotations.push([
-            currentSpan.start,
-            i,
-            currentSpan.label,
-            tokens
-              .slice(currentSpan.start, i)
-              .map((t) => t.text)
-              .join(' '),
-          ]);
-          currentSpan = null;
-        }
-      } else {
-        const [prefix, category] = label.split('-');
+      // Only process B- tags as span starts, mirroring Python's _get_spans logic
+      if (label.startsWith('B-')) {
+        const [, category] = label.split('-');
+        let j = i + 1;
 
-        if (prefix === 'B') {
-          // B tag always closes current span and starts a new one
-          if (currentSpan !== null) {
-            annotations.push([
-              currentSpan.start,
-              i,
-              currentSpan.label,
-              tokens
-                .slice(currentSpan.start, i)
-                .map((t) => t.text)
-                .join(' '),
-            ]);
+        // Extend span while seeing matching I- tags
+        while (j < supersenseLabels.length) {
+          const nextLabel = supersenseLabels[j];
+
+          // Stop if B- or O tag encountered
+          if (nextLabel.startsWith('B-') || nextLabel === 'O') {
+            break;
           }
-          currentSpan = { start: i, label: category };
-        } else if (prefix === 'I') {
-          // I tag behavior mirrors Python's _get_spans (tagger.py:617-626):
-          // - Continue span if category matches current span
-          // - Close span if category differs (malformed BIO) WITHOUT starting new span
-          // - Ignore if no current span (malformed BIO)
-          // Reference: Python breaks the while loop when parts_n[1] != parts[1]
-          if (currentSpan !== null) {
-            if (currentSpan.label !== category) {
-              // Close current span due to category mismatch, don't start new span
-              annotations.push([
-                currentSpan.start,
-                i,
-                currentSpan.label,
-                tokens
-                  .slice(currentSpan.start, i)
-                  .map((t) => t.text)
-                  .join(' '),
-              ]);
-              currentSpan = null;
+
+          // For I- tags, check if category matches
+          if (nextLabel.startsWith('I-')) {
+            const [, nextCategory] = nextLabel.split('-');
+            if (nextCategory !== category) {
+              // Category mismatch - stop extending span
+              // Python: "if parts_n[1] != parts[1]: break" (tagger.py:625)
+              break;
             }
-            // else: category matches, continue current span (no action needed)
+            // Category matches, continue
+            j++;
+          } else {
+            // Unexpected tag format, stop
+            break;
           }
-          // else: no current span (malformed BIO), ignore this I-tag
         }
-      }
-    }
 
-    // Close any remaining span at end of sequence
-    if (currentSpan !== null) {
-      annotations.push([
-        currentSpan.start,
-        supersenseLabels.length,
-        currentSpan.label,
-        tokens
-          .slice(currentSpan.start)
-          .map((t) => t.text)
-          .join(' '),
-      ]);
+        // Create annotation with span from i to j (exclusive end)
+        annotations.push([
+          i,
+          j,
+          category,
+          tokens
+            .slice(i, j)
+            .map((t) => t.text)
+            .join(' '),
+        ]);
+      }
     }
 
     return annotations;

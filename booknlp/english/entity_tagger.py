@@ -138,11 +138,96 @@ class LitBankEntityTagger:
 
         # Calculate wordpiece lengths for each first-phase chunk for debugging
         chunk_wordpiece_lengths = []
+        # Prepare a compact per-chunk sample (first 150 chunks) with token-level wordpiece details
+        chunk_wordpiece_samples = []
         for sent in sents:
             chunk_len = 0
             for toks in sent:
                 chunk_len += len(toks)
             chunk_wordpiece_lengths.append(chunk_len)
+
+        try:
+            for ci, sent in enumerate(sents[:150]):
+                token_details = []
+                for ti, wp_tokens in enumerate(sent):
+                    try:
+                        orig_tok = o_sents[ci][ti]
+                        text = orig_tok.text
+                        prepared = text
+                        if text and text[0].lower() != text[0]:
+                            prepared = "[CAP] " + text.lower()
+                        wp_list = list(wp_tokens)
+                        wp_ids = []
+                        for wp in wp_list:
+                            try:
+                                wid = self.model.tokenizer.convert_tokens_to_ids(wp)
+                            except Exception:
+                                try:
+                                    wid = self.model.tokenizer.vocab.get(wp)
+                                except Exception:
+                                    wid = None
+                            wp_ids.append(wid)
+
+                        wp_len = len(wp_list)
+                        token_details.append(
+                            {
+                                "idx": ti,
+                                "text": text,
+                                "prepared": prepared,
+                                "wp_ids": wp_ids,
+                                "wp_tokens": wp_list,
+                                "wp_len": wp_len,
+                                "token_id": getattr(orig_tok, "token_id", None),
+                            }
+                        )
+                    except Exception:
+                        continue
+                chunk_wordpiece_samples.append(
+                    {"chunkIdx": ci, "tokenDetails": token_details}
+                )
+        except Exception:
+            chunk_wordpiece_samples = []
+
+        # Prepare a compact sample of the first few sents with per-token wordpiece info
+        # This helps compare Python tokenizer outputs to the TypeScript port.
+        sents_sample = []
+        cap_token_id = None
+        try:
+            try:
+                cap_token_id = self.model.tokenizer.convert_tokens_to_ids("[CAP]")
+            except Exception:
+                try:
+                    cap_token_id = self.model.tokenizer.vocab.get("[CAP]")
+                except Exception:
+                    cap_token_id = None
+
+            for si, sent_wp in enumerate(sents[:5]):
+                sample = []
+                # o_sents mirrors sents but holds original Token objects
+                for ti, wp_tokens in enumerate(sent_wp):
+                    try:
+                        orig_tok = o_sents[si][ti]
+                        text = orig_tok.text
+                        prepared = text
+                        if text and text[0].lower() != text[0]:
+                            prepared = "[CAP] " + text.lower()
+                        wp_list = list(wp_tokens)
+                        wp_len = len(wp_list)
+                        sample.append(
+                            {
+                                "text": text,
+                                "prepared": prepared,
+                                "wordpieces": wp_list,
+                                "wp_len": wp_len,
+                                "token_id": getattr(orig_tok, "token_id", None),
+                            }
+                        )
+                    except Exception:
+                        # best-effort: skip malformed entries
+                        continue
+                sents_sample.append(sample)
+        except Exception:
+            sents_sample = []
 
         sentences = []
         o_sentences = []
@@ -211,6 +296,27 @@ class LitBankEntityTagger:
             self.model, sentences, batch_size, self.tagset, training=False
         )
 
+        # Request collection of batch-level debug details for known problematic ranges
+        # so tagger can optionally attach CRF/viterbi internals and we can emit
+        # per-batch tokenization/transforms for easier side-by-side comparison.
+        try:
+            debug_info.setdefault("collect_batch_debug_ranges", [])
+        except Exception:
+            pass
+        # Add the ranges we care about (matches TypeScript debugRanges)
+        try:
+            debug_info["collect_batch_debug_ranges"].extend(
+                [
+                    {"start": 26960, "end": 26990},
+                    {"start": 27030, "end": 27060},
+                    {"start": 27180, "end": 27300},
+                    {"start": 30350, "end": 30365},
+                    {"start": 34805, "end": 34820},
+                ]
+            )
+        except Exception:
+            pass
+
         batch_pos = {}
         for idx, ind in enumerate(ordering):
             batch_id, batch_s, batch_position = order_to_batch_map[idx]
@@ -275,6 +381,97 @@ class LitBankEntityTagger:
             debug_info["debug_batch_sizes_sum"] = sum(debug_info["debug_batch_sizes"])
             debug_info["sentence_lengths"] = sentence_lengths
             debug_info["ordering"] = ordering.tolist()
+
+        # Prepare compact per-batch debug dumps for any batches overlapping our ranges
+        batch_debug_details = []
+        try:
+            ranges = (
+                debug_info.get("collect_batch_debug_ranges", []) if debug_info else []
+            )
+            for b in range(len(batched_sents)):
+                # collect token ids in this batch
+                try:
+                    batch_tokens = []
+                    for sent in batched_pos[b]:
+                        if sent is None:
+                            continue
+                        for tok in sent:
+                            if tok is None:
+                                continue
+                            batch_tokens.append(getattr(tok, "token_id", None))
+                    if len(batch_tokens) == 0:
+                        continue
+                    gstart = min([t for t in batch_tokens if t is not None])
+                    gend = max([t for t in batch_tokens if t is not None])
+                except Exception:
+                    continue
+
+                overlaps = False
+                for r in ranges:
+                    if gstart <= r["end"] and gend >= r["start"]:
+                        overlaps = True
+                        break
+
+                if not overlaps:
+                    continue
+
+                # include tokenization and transform details (convert tensors to lists)
+                try:
+                    input_ids = [
+                        x.tolist() if hasattr(x, "tolist") else list(x)
+                        for x in batched_data[b]
+                    ]
+                except Exception:
+                    try:
+                        input_ids = [list(x) for x in batched_data[b]]
+                    except Exception:
+                        input_ids = None
+
+                try:
+                    mask = [
+                        x.tolist() if hasattr(x, "tolist") else list(x)
+                        for x in batched_mask[b]
+                    ]
+                except Exception:
+                    try:
+                        mask = [list(x) for x in batched_mask[b]]
+                    except Exception:
+                        mask = None
+
+                try:
+                    transforms_list = (
+                        batched_transforms[b].tolist()
+                        if hasattr(batched_transforms[b], "tolist")
+                        else list(batched_transforms[b])
+                    )
+                except Exception:
+                    transforms_list = None
+
+                try:
+                    orig_lens = (
+                        batched_orig_token_lens[b].tolist()
+                        if hasattr(batched_orig_token_lens[b], "tolist")
+                        else list(batched_orig_token_lens[b])
+                    )
+                except Exception:
+                    orig_lens = None
+
+                batch_debug_details.append(
+                    {
+                        "batch_idx": b,
+                        "global_start_token": int(gstart),
+                        "global_end_token": int(gend),
+                        "input_ids": input_ids,
+                        "attention_mask": mask,
+                        "transforms": transforms_list,
+                        "orig_token_lens": orig_lens,
+                    }
+                )
+        except Exception:
+            batch_debug_details = []
+
+        if debug_info is not None and batch_debug_details:
+            debug_info["batch_debug_details"] = batch_debug_details
             debug_info["ordered_sentence_lengths"] = [
                 sentence_lengths[idx] for idx in ordering
             ]
@@ -374,6 +571,10 @@ class LitBankEntityTagger:
         debug_info["chunk_wordpiece_lengths"] = (
             chunk_wordpiece_lengths  # First-phase chunk lengths for debugging
         )
+        debug_info["chunk_wordpiece_samples"] = chunk_wordpiece_samples
+        # Include a small sample of per-token wordpiece splits so TS and Python can be diffed
+        debug_info["sents_sample"] = sents_sample
+        debug_info["tokenizer_cap_token_id"] = cap_token_id
         debug_info["second_phase_group_lengths"] = group_lengths
         debug_info["second_phase_group_chunk_counts"] = group_chunk_counts
         debug_info["raw_batch_sample"] = {

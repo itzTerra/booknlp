@@ -1,5 +1,6 @@
 import sys
 import numpy as np
+from booknlp.common.logger import get_logger
 
 
 def check_span_f1_two_dicts_subcat(gold, pred):
@@ -36,9 +37,9 @@ def check_span_f1_two_dicts_subcat(gold, pred):
     if (precision + recall) > 0:
         mainF = (2 * precision * recall) / (precision + recall)
 
-    print("precision: %.3f %s/%s" % (precision, cor, len(pred)))
-    print("recall: %.3f %s/%s" % (recall, cor, len(gold)))
-    print("F: %.3f" % mainF)
+    get_logger(enabled=True).info("precision: %.3f %s/%s" % (precision, cor, len(pred)))
+    get_logger(enabled=True).info("recall: %.3f %s/%s" % (recall, cor, len(gold)))
+    get_logger(enabled=True).info("F: %.3f" % mainF)
 
     for target_lab in ["PRON", "NOM", "PROP"]:
         cor = 0.0
@@ -56,14 +57,14 @@ def check_span_f1_two_dicts_subcat(gold, pred):
         if (precision + recall) > 0:
             F = (2 * precision * recall) / (precision + recall)
 
-        print(
+        get_logger(enabled=True).info(
             "\n\t%s precision: %.3f %s/%s"
             % (target_lab, precision, cor, len(preds[target_lab]))
         )
-        print(
+        get_logger(enabled=True).info(
             "\t%s recall: %.3f %s/%s"
             % (target_lab, recall, cor, len(golds[target_lab]))
         )
-        print("\t%s F: %.3f" % (target_lab, F))
+        get_logger(enabled=True).info("\t%s F: %.3f" % (target_lab, F))
 
     return mainF

@@ -44,11 +44,19 @@ async function processWithTypescriptBookNLP(
     protocolTimeout: 3000000
   });
 
-  try {
+    try {
     const page = await browser.newPage();
 
-    // Set up console logging
-    page.on('console', (msg) => console.log('PAGE LOG:', msg.text()));
+    // Collect page console logs instead of printing directly
+    const pageLogs: string[] = [];
+    const programLogs: string[] = [];
+    page.on('console', (msg) => {
+      try {
+        pageLogs.push(msg.text());
+      } catch (e) {
+        // best-effort
+      }
+    });
 
     // Create HTML content with local ONNX runtime
     const htmlContent = `
@@ -92,16 +100,20 @@ async function processWithTypescriptBookNLP(
 
     // Check for errors
     if (outputData && outputData.error) {
-      console.error('Validation error:', outputData.error);
-      if (outputData.stack) {
-        console.error('Stack trace:', outputData.stack);
-      }
+      // propagate as exception (do not console.error directly)
       throw new Error(`Validation failed: ${outputData.error}`);
     }
 
-    fs.writeFileSync(outputFile, JSON.stringify(outputData, null, 2), 'utf-8');
+    // Attach collected page logs and program logs to the output debug object
+    try {
+      outputData._debug = outputData._debug || {};
+      outputData._debug["page_console"] = pageLogs;
+      outputData._debug["validation_messages"] = (outputData._debug["validation_messages"] || []).concat(programLogs);
+    } catch (e) {
+      // ignore
+    }
 
-    console.log(`TypeScript BookNLP results saved to ${outputFile}`);
+    fs.writeFileSync(outputFile, JSON.stringify(outputData, null, 2), 'utf-8');
   } finally {
     await browser.close();
     server.close();
@@ -114,12 +126,28 @@ function loadPythonOutput(pythonOutputFile: string): any {
 }
 
 async function main(): Promise<void> {
-  const pythonOutputFile = path.join(__dirname, '..', 'examples', 'python_output.json');
+  // Allow overriding the Python output file via CLI arg or env var.
+  // Priority: --python-output <path> > process.env.PYTHON_OUTPUT > examples/python_minimal.json (if exists) > examples/python_output.json
+  const args = process.argv.slice(2);
+  let pythonOutputFileArg: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--python-output' && args[i + 1]) {
+      pythonOutputFileArg = args[i + 1];
+      break;
+    }
+    if (args[i].startsWith('--python-output=')) {
+      pythonOutputFileArg = args[i].split('=')[1];
+      break;
+    }
+  }
+
+  const minimalPath = path.join(__dirname, '..', 'examples', 'python_minimal.json');
+  const fullPath = path.join(__dirname, '..', 'examples', 'python_output.json');
+
+  let pythonOutputFile = pythonOutputFileArg || process.env.PYTHON_OUTPUT || (fs.existsSync(minimalPath) ? minimalPath : fullPath);
 
   if (!fs.existsSync(pythonOutputFile)) {
-    console.error('ERROR: Python output not found!');
-    console.error('Please run validate_python.py first to generate python_output.json');
-    process.exit(1);
+    throw new Error(`Python output not found at ${pythonOutputFile}. Run validate_python.py to generate python_output.json or provide --python-output`);
   }
 
   const pythonOutput = loadPythonOutput(pythonOutputFile);
@@ -135,8 +163,6 @@ async function main(): Promise<void> {
   const outputFile = path.join(__dirname, '..', 'examples', 'typescript_output.json');
 
   await processWithTypescriptBookNLP(spaCyContext, inputText, outputFile);
-
-  console.log('\n✓ TypeScript validation complete!');
 }
 
 main().catch((error) => {

@@ -119,7 +119,8 @@ def get_batches(model, sentences, max_batch, tagset, training=True):
         all_transforms.append(transform)
 
     lengths = np.array([len(l) for l in all_data])
-    ordering = np.argsort(lengths)
+    # Use stable ordering to keep deterministic batching for equal-length sequences.
+    ordering = np.argsort(lengths, kind="stable")
     ordered_data = [None for i in range(len(all_data))]
     ordered_masks = [None for i in range(len(all_data))]
     ordered_transforms = [None for i in range(len(all_data))]

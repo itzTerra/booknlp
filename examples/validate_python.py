@@ -69,15 +69,25 @@ def process_with_python_booknlp(text: str, output_file: str):
         "_debug": result._debug,
     }
 
+    # Record validation messages in the debug output instead of printing
+    try:
+        if output_data.get("_debug") is None:
+            output_data["_debug"] = {}
+        output_data["_debug"].setdefault("validation_messages", []).append(
+            f"Python BookNLP results saved to {output_file}"
+        )
+    except Exception:
+        pass
+
+    # Write the output JSON (including debug/validation messages)
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(output_data, f, indent=2, ensure_ascii=False)
 
-    print(f"Python BookNLP results saved to {output_file}")
     return output_data
 
 
 if __name__ == "__main__":
-    input_file = Path(__file__).parent / "158_emma.txt"
+    input_file = Path(__file__).parent / "158_emma_cut.txt"
 
     with open(input_file, "r", encoding="utf-8") as f:
         test_text = f.read()
@@ -85,4 +95,3 @@ if __name__ == "__main__":
     output_file = "python_output.json"
 
     process_with_python_booknlp(test_text.strip(), output_file)
-    print("\n✓ Python validation complete!")

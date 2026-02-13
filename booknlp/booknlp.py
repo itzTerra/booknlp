@@ -2,6 +2,7 @@ import sys
 import argparse
 from typing import Any, Dict, Optional
 from transformers import logging
+from booknlp.common.logger import get_logger
 from booknlp.english.english_booknlp import EnglishBookNLP, EnglishBookNLPConfig
 from booknlp.common.core import BookNLPResult
 
@@ -47,11 +48,11 @@ def proc():
     outputFolder = args["outputFolder"]
     idd = args["id"]
 
-    print("tagging %s" % inputFile)
+    get_logger(enabled=True).info("tagging %s" % inputFile)
 
     valid_languages = set(["en"])
     if language not in valid_languages:
-        print(
+        get_logger(enabled=True).info(
             "%s not recognized; supported languages: %s" % (language, valid_languages)
         )
         sys.exit(1)

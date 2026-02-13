@@ -3,32 +3,17 @@ import { validateSpaCyContext, validateBookNLPConfig, throwIfValidationErrors } 
 import { convertSpaCyToTokens } from 'preprocessing';
 import { EntityTagger } from 'entity-tagger';
 
-import entityTagsetUrl from '../public/data/entity_cat.tagset?url';
-import supersenseTagsetUrl from '../public/data/supersense.tagset?url';
-import wordNetUrl from '../public/data/wordnet.first.sense?url';
-import crfTransitionsUrl from '../public/data/crf_transitions.json?url';
+import entityTagsetContent from './assets/data/entity_cat.tagset?raw';
+import supersenseTagsetContent from './assets/data/supersense.tagset?raw';
+import wordNetContent from './assets/data/wordnet.first.sense?raw';
+import crfTransitionsContent from './assets/data/crf_transitions.json?raw';
 
-function resolveResourceUrls(config: BookNLPConfig): ResourceUrls {
-  if (config.resourceUrls) {
-    return config.resourceUrls;
-  }
-
-  const baseUrl = config.resourceBaseUrl;
-  if (baseUrl) {
-    const normalized = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-    return {
-      entityTagset: `${normalized}entity_cat.tagset`,
-      supersenseTagset: `${normalized}supersense.tagset`,
-      wordNet: `${normalized}wordnet.first.sense`,
-      crfTransitions: `${normalized}crf_transitions.json`,
-    };
-  }
-
+function resolveResources(): ResourceUrls {
   return {
-    entityTagset: entityTagsetUrl,
-    supersenseTagset: supersenseTagsetUrl,
-    wordNet: wordNetUrl,
-    crfTransitions: crfTransitionsUrl,
+    entityTagset: entityTagsetContent,
+    supersenseTagset: supersenseTagsetContent,
+    wordNet: wordNetContent,
+    crfTransitions: crfTransitionsContent,
   };
 }
 
@@ -52,13 +37,13 @@ export class EnglishBookNLP {
       pipeline: normalizedPipeline,
     };
 
-    const resourceUrls = resolveResourceUrls(config);
+    const resources = resolveResources();
     const modelPath = config.modelPath || 'Terraa/entities_google_bert_uncased_L-4_H-256_A-4-v1.0-ONNX';
     const executionProviders = config.executionProviders ?? ['wasm'];
 
     this.entityTagger = new EntityTagger(
       modelPath,
-      resourceUrls,
+      resources,
       executionProviders,
       config.wasmPaths
     );

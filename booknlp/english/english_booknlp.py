@@ -4,7 +4,7 @@ import sys
 import spacy
 from dataclasses import dataclass, asdict
 from booknlp.common.pipelines import SpacyPipeline
-from booknlp.common.logger import get_logger
+from booknlp.common.logger import get_logger, get_logs, clear_logs
 from booknlp.english.entity_tagger import LitBankEntityTagger
 from os.path import join
 import os
@@ -363,4 +363,11 @@ class EnglishBookNLP:
                 timing={"elapsed": elapsed} if elapsed is not None else {},
                 _debug=debug_info,
             )
+            # Attach collected logger messages to the debug output and then clear buffer
+            try:
+                result._debug["logs"] = get_logs()
+            except Exception:
+                result._debug["logs"] = []
+            finally:
+                clear_logs()
             return result

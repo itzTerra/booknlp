@@ -93,13 +93,6 @@ If you prefer to host resources externally:
 ```typescript
 const config = {
   pipeline: ['entity', 'supersense'],
-  resourceBaseUrl: 'https://your-cdn.com/booknlp-data/',
-  // OR specify individual URLs:
-  resourceUrls: {
-    entityTagset: 'https://your-cdn.com/entity_cat.tagset',
-    supersenseTagset: 'https://your-cdn.com/supersense.tagset',
-    wordNet: 'https://your-cdn.com/wordnet.first.sense',
-  },
 };
 ```
 
@@ -316,8 +309,6 @@ interface BookNLPConfig {
                                  // Default: 'Terraa/entities_google_bert_uncased_L-4_H-256_A-4-v1.0-ONNX'
   pipeline: string[];            // ['entity', 'supersense', 'event']
   verbose?: boolean;             // Logging verbosity
-  resourceBaseUrl?: string;      // Optional: Base URL for resource files
-  resourceUrls?: ResourceUrls;   // Optional: Individual resource URLs
   executionProviders?: ExecutionProvider[];  // ['wasm', 'webgl', 'webgpu']
   wasmPaths?: string | Record<string, string>;  // Custom WASM paths
 }

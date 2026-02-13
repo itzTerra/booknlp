@@ -9,6 +9,10 @@
         "/^cd /home/terra/Projects/booknlp/examples && uv run compare_outputs\\.py$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^grep -n '\"supersense_debug_positions\"' typescript_output\\.json \\|\\| true$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

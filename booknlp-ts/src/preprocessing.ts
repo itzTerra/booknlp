@@ -30,26 +30,40 @@ export class Tokenizer {
     });
     await this.loadVocab(normalizedModelId);
 
-    // Manually add [CAP] as a special token to match Python behavior
-    // Python adds this with: self.tokenizer.add_tokens(["[CAP]"], special_tokens=True)
-    // Reference: booknlp/english/tagger.py
+    // Ensure [CAP] exists in the vocab mapping. Python adds [CAP] via
+    // tokenizer.add_tokens(...). If add_tokens is available use it; otherwise
+    // ensure our loaded `vocab.txt` contains a mapping for [CAP], inserting a
+    // fallback id (30522) when missing so counts/ids remain stable.
     if (this.tokenizer.add_tokens && typeof this.tokenizer.add_tokens === 'function') {
-      console.warn('[Tokenizer] Calling add_tokens([CAP])...');
-      const result = this.tokenizer.add_tokens([SPECIAL_TOKENS.CAP], { special_tokens: true });
-      console.warn(`[Tokenizer] add_tokens returned: ${result}`);
+      try {
+        console.warn('[Tokenizer] Calling add_tokens([CAP])...');
+        const result = this.tokenizer.add_tokens([SPECIAL_TOKENS.CAP], { special_tokens: true });
+        console.warn(`[Tokenizer] add_tokens returned: ${result}`);
+      } catch (e) {
+        console.warn('[Tokenizer] add_tokens failed, falling back to vocab mapping');
+      }
     } else {
-      console.warn('[Tokenizer] add_tokens method not available');
+      console.warn('[Tokenizer] add_tokens method not available; ensuring vocab mapping for [CAP]');
     }
 
-    // Debug: decode token 30522 to see what it is
+    // If `[CAP]` missing from loaded vocab, add a fallback id 30522.
+    if (!this.vocab.has(SPECIAL_TOKENS.CAP)) {
+      this.vocab.set(SPECIAL_TOKENS.CAP, 30522);
+    }
+
+    // Debug: decode a common token id to inspect tokenizer if available
     try {
-      const decoded = this.tokenizer.decode([30522]);
-      console.warn(`[Tokenizer] Token 30522 decodes to: "${decoded}"`);
+      const decoded = this.tokenizer.decode([this.vocab.get(SPECIAL_TOKENS.CAP) ?? 30522]);
+      console.warn(`[Tokenizer] Token ${this.vocab.get(SPECIAL_TOKENS.CAP) ?? 30522} decodes to: "${decoded}"`);
     } catch (e) {
-      console.warn(`[Tokenizer] Failed to decode token 30522: ${e}`);
+      console.warn(`[Tokenizer] Failed to decode token for [CAP]: ${e}`);
     }
 
     this.initialized = true;
+  }
+
+  getCapTokenId(): number {
+    return this.vocab.get(SPECIAL_TOKENS.CAP) ?? 30522;
   }
 
   private resolveVocabUrl(modelId: string): string {
@@ -204,21 +218,22 @@ export class Tokenizer {
     return 1 + wordTokens.length;  // [CAP] (1) + lowercase word tokens
   }
 
-  debugEncodeToken(text: string): { prepared: string; ids: number[] } {
+  debugEncodeToken(text: string): { prepared: string; ids: number[]; tokens: string[] } {
     this.ensureInitialized();
 
     const firstChar = text[0];
     const isCapitalized = firstChar && firstChar.toLowerCase() !== firstChar;
 
     if (isCapitalized) {
-      // Match actual tokenizeTokens behavior: [CAP] token (30522) + word tokens
+      // Match actual tokenizeTokens behavior: [CAP] token + word tokens
       const lowercased = text.toLowerCase();
       const wordTokens = this.wordpieceTokenize(lowercased);
       const wordIds = this.tokensToIds(wordTokens);
-      // Construct the IDs as tokenizeTokens would: [30522] followed by actual word tokens
-      const ids = [this.vocab.get('[CAP]') ?? 30522, ...wordIds];
+      // Use a stable vocab id for [CAP] (fallback to 30522)
+      const capId = this.vocab.get(SPECIAL_TOKENS.CAP) ?? 30522;
+      const ids = [capId, ...wordIds];
       const prepared = `[CAP] ${lowercased}`;
-      return { prepared, ids };
+      return { prepared, ids, tokens: [SPECIAL_TOKENS.CAP, ...wordTokens] };
     }
 
     // Non-capitalized: encode as-is
@@ -226,7 +241,7 @@ export class Tokenizer {
     const tokens = this.wordpieceTokenize(prepared);
     const ids = this.tokensToIds(tokens);
 
-    return { prepared, ids };
+    return { prepared, ids, tokens };
   }
 
   tokenize(spaCyContext: SpaCyContext): BertTokenizationResult {
@@ -378,7 +393,16 @@ export class Tokenizer {
       return 0;
     }
 
-    return this.countCapTokensSeparately(text);
+    // Use the same deterministic encoder used by batching so counts match
+    // the actual tokenization output. This reduces mismatch risk between
+    // the Python tokenizer and this JS implementation.
+    try {
+      const enc = this.debugEncodeToken(text);
+      return enc.ids.length;
+    } catch (e) {
+      // Fallback: previous count logic
+      return this.countCapTokensSeparately(text);
+    }
   }
 
 }

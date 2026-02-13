@@ -118,8 +118,6 @@ export interface BookNLPConfig {
   // Each string should be one of: "entity", "supersense", "event"
   pipeline: string | string[];
   verbose?: boolean;
-  resourceBaseUrl?: string;
-  resourceUrls?: ResourceUrls;
   executionProviders?: ExecutionProvider[];
   wasmPaths?: string | Record<string, string>;
 }
