@@ -11,4 +11,4 @@ class BookNLPResult:
     entities: List[Dict[str, Any]]
     supersense: List[Any]
     timing: Dict[str, Any]
-    _debug: Dict[str, Any] = field(default_factory=dict)
+    # debug collection removed

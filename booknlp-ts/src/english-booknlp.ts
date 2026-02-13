@@ -72,14 +72,7 @@ export class EnglishBookNLP {
     this.tokens = convertSpaCyToTokens(spaCyContext);
     this.timing['token_conversion'] = performance.now() - conversionTime;
 
-    const debugInfo: Record<string, any> = {
-      raw_tokens_count: this.tokens.length,
-      raw_tokens_sample: this.tokens.slice(0, 5).map(t => ({
-        text: t.text,
-        tokenId: t.tokenId,
-        sentenceId: t.sentenceId,
-      })),
-    };
+    // Debug output removed
 
     const taggerTime = performance.now();
     const taggerResults = await this.entityTagger.tag(
@@ -88,9 +81,7 @@ export class EnglishBookNLP {
     );
     this.timing['tagger_inference'] = performance.now() - taggerTime;
 
-    if (taggerResults._debug) {
-      Object.assign(debugInfo, taggerResults._debug);
-    }
+    // ignore any debug payloads from tagger
 
     // Apply pipeline task flags to selectively populate results
     // Mirror Python behavior (english_booknlp.py:105-111): only populate results for enabled tasks
@@ -142,7 +133,6 @@ export class EnglishBookNLP {
       entities: entities,
       supersense: supersense,
       timing: this.timing,
-      _debug: debugInfo,
     };
   }
 }

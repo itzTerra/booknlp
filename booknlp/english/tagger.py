@@ -446,31 +446,7 @@ class Tagger(nn.Module):
                 all_tags2[idx] = all_tags2[idx][: len(all_tags1[idx])]
                 all_tags3[idx] = all_tags3[idx][: len(all_tags1[idx])]
 
-            # If caller requested batch-level debug collection, capture CRF viterbi paths for this batch
-            try:
-                if debug_info is not None and debug_info.get("collect_debug"):
-                    try:
-                        entities_viterbi = {
-                            "entities_layer1": [
-                                list(tags.data.cpu().numpy()) for tags in t1
-                            ],
-                            "entities_layer2": [
-                                list(tags.data.cpu().numpy()) for tags in t2
-                            ],
-                            "entities_layer3": [
-                                list(tags.data.cpu().numpy()) for tags in t3
-                            ],
-                        }
-                        debug_info.setdefault("tagger_viterbi", []).append(
-                            {
-                                "batch_idx": debug_info.get("batch_idx"),
-                                "entities": entities_viterbi,
-                            }
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            # debug collection removed
 
         ###
         # EVENTS
@@ -494,75 +470,11 @@ class Tagger(nn.Module):
             lstm_out1, _ = self.supersense_lstm1(reduced_wn)
             tag_space1 = self.supersense_hidden2tag1(lstm_out1)
 
-            # Debug: optionally dump raw supersense logits for a specific sentence/token
-            try:
-                if debug_info is not None:
-                    # debug_info expected: { 'batch_idx': int, 'sent_idx': int, 'token_pos': int, 'global_start_token': int }
-                    sent_idx = debug_info.get("sent_idx")
-                    token_pos = debug_info.get("token_pos")
-                    batch_idx = debug_info.get("batch_idx")
-                    if sent_idx is not None and token_pos is not None:
-                        # tag_space1 shape: [batch_size, seq_len, num_labels]
-                        sent_logits = tag_space1[sent_idx].cpu().numpy()
-                        get_logger(enabled=True).info(
-                            "[DEBUG Supersense Logits - Python]"
-                        )
-                        get_logger(enabled=True).info(
-                            f"  Batch index: {batch_idx} sentence index: {sent_idx} token_pos: {token_pos} global_start_token: {debug_info.get('global_start_token')}"
-                        )
-                        token_ids = ["%d" % (i,) for i in range(sent_logits.shape[0])]
-                        # print logits for the token of interest and its neighbors
-                        start = max(0, token_pos - 2)
-                        end = min(sent_logits.shape[0], token_pos + 3)
-                        debug_rows = []
-                        for idx in range(start, end):
-                            logits_row = sent_logits[idx]
-                            float_row = list(map(float, logits_row))
-                            debug_rows.append(
-                                {
-                                    "local_idx": int(idx),
-                                    "logits": float_row,
-                                }
-                            )
-                            get_logger(enabled=True).info(
-                                f"    LocalIdx={idx} TokenPos={idx} Logits(len={len(logits_row)}): {float_row}"
-                            )
-
-                        # Attach structured logits to debug_info so validator writes them to output JSON
-                        try:
-                            debug_info["supersense_debug_logits"] = {
-                                "global_start_token": debug_info.get(
-                                    "global_start_token"
-                                ),
-                                "local_start": int(start),
-                                "local_end": int(end),
-                                "rows": debug_rows,
-                            }
-                        except Exception:
-                            # best-effort: don't fail tagging if debug attachment fails
-                            pass
-            except Exception:
-                pass
+            # debug collection removed
 
             _, t1 = self.supersense_crf.viterbi_decode(tag_space1, ll - 2)
 
-            # Capture supersense viterbi paths if requested
-            try:
-                if debug_info is not None and debug_info.get("collect_debug"):
-                    try:
-                        supersense_paths = [
-                            list(tags.data.cpu().numpy()) for tags in t1
-                        ]
-                        debug_info.setdefault("tagger_viterbi", []).append(
-                            {
-                                "batch_idx": debug_info.get("batch_idx"),
-                                "supersense_layer1": supersense_paths,
-                            }
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            # debug collection removed
 
             all_supersense_tags1, all_index1, all_missing1, n_lens1 = (
                 get_supersense_layer_transformation(tag_space1, t1)
@@ -594,70 +506,8 @@ class Tagger(nn.Module):
         preds_in_order = events_in_order = supersense_preds_in_order = None
 
         with torch.no_grad():
-            # Preserve outer debug request so we can inject batch-specific debug flags
-            outer_debug_request = debug_info
+            # debug collection removed (incoming debug_info ignored)
             for b in range(len(batched_data)):
-                # detect whether this batch contains a token we want to debug (e.g., 30357)
-                local_debug = None
-                try:
-                    # batched_sents[b] is a list of sentences; each sentence is a list-like where token objects are at indices starting at 1
-                    for si, sent in enumerate(batched_sents[b]):
-                        tokens = sent[1:]
-                        token_ids = [getattr(t, "token_id", None) for t in tokens]
-                        if 30357 in token_ids:
-                            local_debug = {
-                                "batch_idx": b,
-                                "sent_idx": si,
-                                "token_pos": token_ids.index(30357),
-                                "global_start_token": token_ids[0]
-                                if len(token_ids) > 0
-                                else None,
-                            }
-                            break
-
-                        # If the outer debug request asks for collecting per-batch internals for ranges,
-                        # propagate that request into the outer_debug_request so _predict_all may attach viterbi paths.
-                        if outer_debug_request is not None and outer_debug_request.get(
-                            "collect_batch_debug_ranges"
-                        ):
-                            # check whether any token_id in this batch overlaps a target range
-                            for tok_idx, tokid in enumerate(token_ids):
-                                if tokid is None:
-                                    continue
-                                for r in outer_debug_request.get(
-                                    "collect_batch_debug_ranges", []
-                                ):
-                                    if tokid >= r.get("start", 0) and tokid <= r.get(
-                                        "end", 0
-                                    ):
-                                        # annotate outer_debug_request with batch details; _predict_all will read these keys
-                                        outer_debug_request["batch_idx"] = b
-                                        outer_debug_request["sent_idx"] = si
-                                        outer_debug_request["token_pos"] = tok_idx
-                                        outer_debug_request["global_start_token"] = (
-                                            token_ids[0] if len(token_ids) > 0 else None
-                                        )
-                                        outer_debug_request["collect_debug"] = True
-                                        break
-                                if outer_debug_request.get("collect_debug"):
-                                    break
-                        if outer_debug_request is not None and outer_debug_request.get(
-                            "collect_debug"
-                        ):
-                            break
-                    # prefer local_debug (explicit token 30357) if present
-                    if local_debug is not None:
-                        debug_info = local_debug
-                    else:
-                        debug_info = (
-                            outer_debug_request
-                            if outer_debug_request
-                            and outer_debug_request.get("collect_debug")
-                            else None
-                        )
-                except Exception:
-                    debug_info = None
-
                 all_tags1, all_tags2, all_tags3, event_logits, all_supersense_tags1 = (
                     self._predict_all(
                         batched_wn[b],
@@ -672,22 +522,7 @@ class Tagger(nn.Module):
                     )
                 )
 
-                # Clear any transient collect_debug flags so they don't leak to other batches
-                try:
-                    if outer_debug_request is not None and outer_debug_request.get(
-                        "collect_debug"
-                    ):
-                        for k in [
-                            "batch_idx",
-                            "sent_idx",
-                            "token_pos",
-                            "global_start_token",
-                            "collect_debug",
-                        ]:
-                            if k in outer_debug_request:
-                                outer_debug_request.pop(k, None)
-                except Exception:
-                    pass
+                # debug collection removed
 
                 # for each sentence in the batch
 
@@ -776,7 +611,7 @@ class Tagger(nn.Module):
     def _get_spans(self, rev_tagset, doc_idx, tags, length, sentence):
         # remove the opening [CLS] and closing [SEP]
         tags = tags[: length - 2]
-        # Debugging: log raw tag strings and token info for problematic ranges
+        # Extract tag strings and token metadata (debugging removed)
         try:
             tag_strings = [rev_tagset[int(t)] for t in tags]
             token_ids = [getattr(tok, "token_id", None) for tok in (sentence or [])][
@@ -785,73 +620,6 @@ class Tagger(nn.Module):
             token_texts = [getattr(tok, "text", None) for tok in (sentence or [])][
                 : len(tag_strings)
             ]
-
-            debug_ranges = [
-                (26960, 26990),
-                (27030, 27060),
-                (27180, 27300),
-                (30350, 30365),
-                (34805, 34820),
-            ]
-
-            def in_debug_range(tid):
-                if tid is None:
-                    return False
-                for a, b in debug_ranges:
-                    if a <= tid <= b:
-                        return True
-                return False
-
-            if any(in_debug_range(tid) for tid in token_ids if tid is not None):
-                get_logger(enabled=True).info(
-                    "[DEBUG _get_spans] doc_idx=%s length=%s" % (doc_idx, length)
-                )
-                get_logger(enabled=True).info(
-                    "  Tag strings: %s" % (", ".join(tag_strings))
-                )
-                get_logger(enabled=True).info(
-                    "  Token IDs: %s" % (", ".join(str(t) for t in token_ids))
-                )
-                get_logger(enabled=True).info(
-                    "  Token texts: %s" % (" | ".join(str(t) for t in token_texts))
-                )
-
-                # Additionally print extracted B- spans and orphan I- tags for visibility
-                for idx, tag in enumerate(tag_strings):
-                    tok_id = token_ids[idx] if idx < len(token_ids) else None
-                    txt = token_texts[idx] if idx < len(token_texts) else None
-                    if tag.startswith("B-"):
-                        parts = tag.split("-")
-                        j = idx + 1
-                        while True:
-                            if j >= len(tag_strings):
-                                break
-                            tagn = tag_strings[j]
-                            if tagn.startswith("B") or tagn.startswith("O"):
-                                break
-                            parts_n = tagn.split("-")
-                            if parts_n[1] != parts[1]:
-                                break
-                            j += 1
-                        # compute end token id/text
-                        end_tok_id = (
-                            token_ids[j - 1] if (j - 1) < len(token_ids) else None
-                        )
-                        span_text = " ".join([str(x) for x in token_texts[idx:j]])
-                        get_logger(enabled=True).info(
-                            f"    B-span: start_idx={idx} token_id={tok_id} end_idx={j - 1} end_token_id={end_tok_id} category={parts[1]} text='{span_text}'"
-                        )
-                    elif tag.startswith("I-"):
-                        # detect orphan I- (previous tag not B- of same category)
-                        prev = tag_strings[idx - 1] if idx - 1 >= 0 else "O"
-                        prev_cat = None
-                        if prev.startswith("B-") or prev.startswith("I-"):
-                            prev_cat = prev.split("-")[1]
-                        cur_cat = tag.split("-")[1] if "-" in tag else None
-                        if prev_cat != cur_cat or not prev.startswith("B-"):
-                            get_logger(enabled=True).info(
-                                f"    Orphan I- at idx={idx} token_id={tok_id} category={cur_cat} text='{txt}' (no preceding B-)"
-                            )
         except Exception:
             pass
         entities = {}

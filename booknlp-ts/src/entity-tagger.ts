@@ -198,7 +198,6 @@ export class EntityTagger {
     entities?: EntityAnnotation[];
     supersense?: SupersenseAnnotation[];
     events?: Set<number>;
-    _debug?: Record<string, any>;
   }> {
     if (!this.initialized) {
       throw new Error('EntityTagger not initialized. Call initialize() first.');
@@ -234,7 +233,6 @@ export class EntityTagger {
       }))
       .sort((a, b) => a.length - b.length);
 
-    // Debug: Track sentence grouping (corresponds to Python's len(sentences))
     const preGroupCount = sentenceBatches.length;
     const postSortCount = orderedSentences.length;
     const secondPhaseGroups = sentenceBatches.length;
@@ -242,19 +240,12 @@ export class EntityTagger {
     const allEntityAnnotations: EntityAnnotation[] = [];
     const allSupersenseAnnotations: SupersenseAnnotation[] = [];
     const allEvents = new Set<number>();
-    const debugWordNetBatches: any[] = [];
-    const debugWordNetBatchShapes: Array<[number, number]> = [];
-    const supersenseDebugLogits: any[] = [];
-    const allBatchDebugDetails: any[] = [];
 
     let batchCount = 0;
     let batchIdx = 0;
     let currentBatchSize = maxBatchSize;
 
-    // Debug: Track batching behavior to match Python's adaptive batching
-    // Python adaptively reduces batch size when sequence length exceeds thresholds
-    // Reference: booknlp/common/layered_reader.py:318-325
-    let debugBatchSizes: number[] = [];
+    // debug collection removed
 
     while (batchIdx < orderedSentences.length) {
       const batchSizeUsed = currentBatchSize;
@@ -263,8 +254,7 @@ export class EntityTagger {
       const batchMaxLen = Math.max(...batchSlice.map(item => item.length));
       const batchInputs = batchSlice.map(item => item.batch);
 
-      // Debug: Record actual batch size used
-      debugBatchSizes.push(batchSlice.length);
+      // debug collection removed
 
       // Debug: Collect WordNet sense batch information ONCE per ONNX inference batch
       // Match Python: _get_wn() creates one wn_batch per ONNX batch (not per phase-2 group)
@@ -285,15 +275,7 @@ export class EntityTagger {
       }
 
       const wnSensesLength = maxOriginalTokens;
-      debugWordNetBatches.push({
-        batchTokenCount,
-        batchSpaCyTokenCount,
-        wnSensesLength,
-      });
-
-      // Match Python: wn_batches_shapes uses unpadded max sentence length from _get_wn
-      // Reference: booknlp/english/entity_tagger.py:49-89
-      debugWordNetBatchShapes.push([batchInputs.length, wnSensesLength]);
+      // (no-op: wordnet batch collection removed)
 
       const batchResults = await this.processSentenceBatch(batchInputs);
       batchCount++;
@@ -307,14 +289,7 @@ export class EntityTagger {
       if (batchResults.events) {
         batchResults.events.forEach(tokenId => allEvents.add(tokenId));
       }
-      // Collect any debug logits produced by processSingleBatch for later inclusion
-      if ((batchResults as any)._debug && (batchResults as any)._debug.supersense_debug_logits) {
-        supersenseDebugLogits.push(...(batchResults as any)._debug.supersense_debug_logits);
-      }
-      // Collect per-batch debug details if present
-      if ((batchResults as any)._debug && (batchResults as any)._debug.batch_debug_details) {
-        allBatchDebugDetails.push(...(batchResults as any)._debug.batch_debug_details);
-      }
+      // (no-op: per-batch debug collection removed)
 
       // Adaptive batch sizing to match Python
       // Reference: booknlp/common/layered_reader.py:318-325
@@ -329,58 +304,11 @@ export class EntityTagger {
       batchIdx += batchSizeUsed;
         }
 
-        // Debug info to match Python's debug output structure
-    // Python's batches_count is len(batched_sents), which is the number of inference batches
-    // Reference: booknlp/english/entity_tagger.py:256
-    const debugInfo: Record<string, any> = {
-      batches_count: batchCount,
-      chunk_wordpiece_lengths: chunkWordpieceLengths,
-      chunk_wordpiece_samples: chunkWordpieceSamples,
-      sents_sample: sentsSample,
-      tokenizer_cap_token_id: this.tokenizer.getCapTokenId(),
-      first_phase_chunks: firstPhaseChunks,
-      second_phase_groups: secondPhaseGroups,
-      sentence_groups_before_sort: preGroupCount,
-      sentence_chunks_count: firstPhaseChunks,  // First phase chunks, not second phase groups
-      ordered_sentences_count: postSortCount,
-      sentence_lengths: sentenceLengths,
-      ordering: orderedSentences.map((entry) => entry.index),
-      ordered_sentence_lengths: orderedSentences.map((entry) => entry.length),
-      second_phase_group_lengths: secondPhaseGroupLengths,
-      second_phase_group_chunk_counts: secondPhaseGroupChunkCounts,
-      extracted_entities_count: allEntityAnnotations.length,
-      extracted_supersense_count: allSupersenseAnnotations.length,
-      wn_batches_count: debugWordNetBatches.length,
-      wn_batches_shapes: debugWordNetBatchShapes,
-      wn_batches_details: debugWordNetBatches,
-      debug_batch_sizes: debugBatchSizes,
-      debug_batch_sizes_sum: debugBatchSizes.reduce((a, b) => a + b, 0),
-      supersense_debug_logits: supersenseDebugLogits.length > 0 ? supersenseDebugLogits : undefined,
-      batch_debug_details: allBatchDebugDetails.length > 0 ? allBatchDebugDetails : undefined,
-      // Debug: Supersense annotations at problematic positions
-      // Sort by start token ID to match Python output order (Python iterates through tokens)
-      supersense_debug_positions: allSupersenseAnnotations
-        .filter(ann => {
-          const tokenId = ann[0];
-          return [
-            26968, 26969, 26979, 27033, 27049, 27186, 27266, 27286, 30357, 34811
-          ].includes(tokenId) ||
-          (tokenId >= 26960 && tokenId <= 26990) ||
-          (tokenId >= 27030 && tokenId <= 27060) ||
-          (tokenId >= 27180 && tokenId <= 27300) ||
-          (tokenId >= 30350 && tokenId <= 30365) ||
-          (tokenId >= 34805 && tokenId <= 34820);
-        })
-        .sort((a, b) => a[0] - b[0])  // Sort by start tokenId to match Python's iteration order
-        .map(ann => ({ start: ann[0], end: ann[1], category: ann[2], text: ann[3] })),
-    };
-
-    return {
-      entities: allEntityAnnotations,
-      supersense: allSupersenseAnnotations,
-      events: allEvents,
-      _debug: debugInfo,
-    };
+        return {
+          entities: allEntityAnnotations,
+          supersense: allSupersenseAnnotations,
+          events: allEvents,
+        };
   }
 
   private createSentenceBatches(
@@ -436,36 +364,10 @@ export class EntityTagger {
         spaCyTokens: currentSentenceSpaCy,
       });
     }
-    // Debug: sentenceChunks.length should equal splitCount + 1 (splits + final append)
-    // console.log(`DEBUG TS: Created ${sentenceChunks.length} sentence chunks after ${splitCount} splits`);
+    // debug collection removed
     const firstPhaseCount = sentenceChunks.length;
-    // Prepare a compact sample of the first few phase-1 sentence chunks (for parity with Python)
+    // Prepare a compact sample placeholder of the first few phase-1 sentence chunks
     const sentsSample: any[] = [];
-    try {
-      for (let si = 0; si < Math.min(5, sentenceChunks.length); si++) {
-        const sent = sentenceChunks[si];
-        const sample: any[] = [];
-        for (let ti = 0; ti < sent.spaCyTokens.length; ti++) {
-          const spa = sent.spaCyTokens[ti];
-          const text = spa.text;
-          try {
-            const enc = this.tokenizer.debugEncodeToken(text);
-            sample.push({
-              text: text,
-              prepared: enc.prepared,
-              wordpieces: enc.tokens,
-              wp_len: enc.ids.length,
-              token_id: sent.tokens[ti]?.tokenId ?? null,
-            });
-          } catch (e) {
-            continue;
-          }
-        }
-        sentsSample.push(sample);
-      }
-    } catch (e) {
-      // ignore sample construction errors
-    }
     // Phase 2: Group phase-1 chunks into batches, recalculating wordpiece lengths
     // Python does this in entity_tagger.py:150-187, recalculating lengths fresh for each chunk
     // Reference: booknlp/english/entity_tagger.py:151-153
@@ -486,38 +388,15 @@ export class EntityTagger {
       // Python doesn't store lengths from phase 1; it calculates them fresh when grouping
       // Reference: booknlp/english/entity_tagger.py:159-162
       const chunkLength = this.calculateChunkWordpieceLength(chunk.spaCyTokens);
-      // Store for debug output
+      // debug collection removed
       chunkWordpieceLengths.push(chunkLength);
 
-      // Debug: Log when chunk wordpiece length differs from expected Python values
+      // debug collection removed
       // Known Python values for indices 9, 20, 36-37, 84, 113...
       const chunkIdx = chunkWordpieceLengths.length - 1;
       if (chunkIdx < 150) {
-        // Log details of the chunk for the first significant mismatches
-        const pythonExpected: Record<number, number> = {
-          9: 26,  // TS has 30 (+4)
-          20: 80, // TS has 84 (+4)
-          36: 57, // TS has 61 (+4)
-          37: 42, // TS has 50 (+8)
-          84: 66, // TS has 70 (+4)
-          113: 21, // TS has 25 (+4)
-          130: 36, // TS has 44 (+8)
-        };
-        // Build detailed token debug info for this chunk
-        const tokenDetails = chunk.spaCyTokens.map((t, i) => {
-          const enc = this.tokenizer.debugEncodeToken(t.text);
-          const cnt = this.tokenizer.countTokens(t.text);
-          return { idx: i, text: t.text, count: cnt, prepared: enc.prepared, wp_ids: enc.ids, wp_tokens: enc.tokens, wp_len: enc.ids.length };
-        });
-
-        // Store per-chunk sample for top-level debug export
-        chunkWordpieceSamples.push({ chunkIdx, tokenDetails });
-
-        if (pythonExpected[chunkIdx] && chunkLength !== pythonExpected[chunkIdx]) {
-          console.log(`CHUNK ${chunkIdx} LENGTH MISMATCH: Expected=${pythonExpected[chunkIdx]}, Got=${chunkLength}, Diff=${chunkLength - pythonExpected[chunkIdx]}`);
-          console.log(`  Chunk has ${chunk.spaCyTokens.length} spaCy tokens`);
-          console.log(`  All ${tokenDetails.length} token details: ${JSON.stringify(tokenDetails)}`);
-        }
+        // Minimal sample placeholder
+        chunkWordpieceSamples.push({ chunkIdx, tokenCount: chunk.spaCyTokens.length });
       }
 
       // Match Python: check if adding this chunk would exceed limit
@@ -600,9 +479,6 @@ export class EntityTagger {
     entities?: EntityAnnotation[];
     supersense?: SupersenseAnnotation[];
     events?: Set<number>;
-    _debug?: {
-      wnBatchShape?: [number, number];
-    };
   }> {
     const maxSequenceLength = 500;
 
@@ -613,9 +489,6 @@ export class EntityTagger {
     const allEntities: EntityAnnotation[] = [];
     const allSupersense: SupersenseAnnotation[] = [];
     const allEvents = new Set<number>();
-    const localSupersenseDebugLogits: any[] = [];
-
-
     const singleBatchResults = await this.processSingleBatch(
       batches,
       maxSequenceLength
@@ -631,22 +504,10 @@ export class EntityTagger {
         singleBatchResults.events.forEach(tokenId => allEvents.add(tokenId));
     }
 
-    const debugOut: Record<string, any> = {};
-    if ((singleBatchResults as any).wnBatchShape) {
-      debugOut.wnBatchShape = (singleBatchResults as any).wnBatchShape;
-    }
-    if ((singleBatchResults as any).supersense_debug_logits) {
-      debugOut.supersense_debug_logits = (singleBatchResults as any).supersense_debug_logits;
-    }
-    if ((singleBatchResults as any).batch_debug_details) {
-      debugOut.batch_debug_details = (singleBatchResults as any).batch_debug_details;
-    }
-
     return {
       entities: allEntities,
       supersense: allSupersense,
       events: allEvents,
-      _debug: Object.keys(debugOut).length > 0 ? debugOut : undefined,
     };
   }
 
@@ -657,11 +518,6 @@ export class EntityTagger {
     entities?: EntityAnnotation[];
     supersense?: SupersenseAnnotation[];
     events?: Set<number>;
-    wnBatchShape?: [number, number];
-    supersense_debug_logits?: any[];
-    batch_debug_details?: any[];
-    paddedWordpieceLen?: number;
-    paddedOriginalLen?: number;
   }> {
 
     const allInputIds: number[][] = [];
@@ -671,8 +527,7 @@ export class EntityTagger {
     const allWordnetSenses: number[][] = [];
     const tokenCounts: number[] = [];
 
-    const localSupersenseDebugLogits: any[] = [];
-    const localBatchDebugs: any[] = [];
+
 
     let maxSeqLen = 0;
     let maxOriginalTokens = 0;
@@ -762,7 +617,6 @@ export class EntityTagger {
         entities: [],
         supersense: [],
         events: new Set<number>(),
-        wnBatchShape,
       };
     }
 
@@ -783,41 +637,7 @@ export class EntityTagger {
       );
       layer1Transforms.push(layer1Transform);
 
-      // Record per-batch debug info for overlapping ranges (initial snapshot including layer1 viterbi)
-      try {
-        const batchTokens = batches[i].tokens || [];
-        const gstart = batchTokens[0]?.tokenId ?? null;
-        const gend = batchTokens[batchTokens.length - 1]?.tokenId ?? null;
-        const debugRanges = [
-          { start: 26960, end: 26990 },
-          { start: 27030, end: 27060 },
-          { start: 27180, end: 27300 },
-          { start: 30350, end: 30365 },
-          { start: 34805, end: 34820 },
-        ];
-        let overlaps = false;
-        for (const r of debugRanges) {
-          if (gstart !== null && gend !== null && gstart <= r.end && gend >= r.start) {
-            overlaps = true;
-            break;
-          }
-        }
-        if (overlaps) {
-          localBatchDebugs.push({
-            batch_idx: i,
-            global_start_token: gstart,
-            global_end_token: gend,
-            input_ids: allInputIds[i].slice(),
-            attention_mask: allAttentionMask[i].slice(),
-            transform_matrix: allTransformMatrices[i].map(r => r.slice()),
-            subword_to_token_map: allSubwordToTokenMap[i] ? allSubwordToTokenMap[i].slice() : [],
-            token_count: tokenCounts[i],
-            entities_layer1_indices: Array.from(entities1Indices || [] as any),
-          });
-        }
-      } catch (e) {
-        // ignore
-      }
+      // per-batch debug collection removed
     }
 
     const layer1Matrices = layer1Transforms.map((transform) =>
@@ -859,14 +679,7 @@ export class EntityTagger {
       );
       layer2Transforms.push(layer2Transform);
 
-      try {
-        const dbg = localBatchDebugs.find((d: any) => d.batch_idx === i);
-        if (dbg) {
-          dbg.entities_layer2_indices = Array.from(entities2IndicesRaw || [] as any);
-        }
-      } catch (e) {
-        // ignore
-      }
+      // per-batch debug collection removed
     }
 
     const layer2Matrices = layer2Transforms.map((transform) =>
@@ -979,24 +792,7 @@ export class EntityTagger {
 
         const typedEntities = this.advancedPostProcessor.assignEntityTypes(mergedEntities, this.entityCategoryMap);
 
-        // Debug: Log entities in problematic ranges
-        const debugEntityRanges = [
-          { start: 70182, end: 70216, name: 'Range 70182-70216 (PER entity issue)' },
-          { start: 70331, end: 70345, name: 'Range 70331-70345 (PER entity issue)' },
-        ];
-
-        const debugEntitiesInBatch = typedEntities.filter(entity =>
-          debugEntityRanges.some(range =>
-            !(entity.endToken < range.start || entity.startToken > range.end)
-          )
-        );
-
-        if (debugEntitiesInBatch.length > 0) {
-          console.log(`\n[DEBUG Entities] Extracted ${debugEntitiesInBatch.length} entities in problem ranges:`);
-          debugEntitiesInBatch.forEach(entity => {
-            console.log(`    Entity: tokenIds=[${entity.startToken}-${entity.endToken}] cat="${entity.cat}" text="${entity.text}"`);
-          });
-        }
+        // entity debug logging removed
 
         typedEntities.forEach(entity => {
           const startTokenId = batchTokens[entity.startToken]?.tokenId ?? entity.startToken;
@@ -1028,122 +824,11 @@ export class EntityTagger {
         );
         const fixedSupersense = this.advancedPostProcessor.fixBIOTags(supersenseTags);
 
-        // Debug: Log comprehensive tag sequences and extraction for problematic token ranges
-        // Reference: Python's _get_spans in tagger.py:598-631
-        const debugRanges = [
-          { start: 26960, end: 26990, name: 'Range 26960-26990 (verb.motion/stative issue)' },
-          { start: 27030, end: 27060, name: 'Range 27030-27060 (noun.person span issue)' },
-          { start: 27180, end: 27300, name: 'Range 27180-27300 (noun.communication/substance/attribute issues)' },
-          { start: 30350, end: 30365, name: 'Range 30350-30365 (noun.event issue)' },
-          { start: 34805, end: 34820, name: 'Range 34805-34820 (verb.cognition/possession issue)' },
-        ];
-
-        for (const range of debugRanges) {
-          const globalStartToken = batchTokens[0]?.tokenId ?? 0;
-          const globalEndToken = batchTokens[tokenCount - 1]?.tokenId ?? 0;
-
-          if (globalStartToken <= range.end && globalEndToken >= range.start) {
-            const localStart = Math.max(0, range.start - globalStartToken);
-            const localEnd = Math.min(tokenCount, range.end - globalStartToken + 1);
-
-            if (localStart < tokenCount && localEnd > 0) {
-              console.log(`\n[DEBUG Supersense] ${range.name}`);
-              console.log(`  Batch tokens ${globalStartToken} to ${globalEndToken}`);
-              console.log(`  Local indices ${localStart} to ${localEnd}`);
-              console.log(`  Raw tags: ${supersenseTags.slice(localStart, localEnd).join(', ')}`);
-              console.log(`  Fixed tags: ${fixedSupersense.slice(localStart, localEnd).join(', ')}`);
-              console.log(`  Token IDs: ${batchTokens.slice(localStart, localEnd).map(t => t.tokenId).join(', ')}`);
-              console.log(`  Token texts: ${batchTokens.slice(localStart, localEnd).map(t => t.text).join(' ')}`);
-              // Dump raw supersense logits for tokens in this local window
-              try {
-                const logitsForBatch = supersenseLogits[i];
-                if (logitsForBatch && logitsForBatch.length > 0) {
-                  console.log(`  [Supersense Logits - TypeScript] Logging tokens ${localStart}..${localEnd - 1}`);
-                  for (let li = localStart; li < localEnd; li++) {
-                    const token = batchTokens[li];
-                    const tokenId = token?.tokenId ?? li;
-                    const text = token?.text ?? '[UNKNOWN]';
-                    const logitsRow = logitsForBatch[li] || null;
-                    console.log(`    Token ${tokenId} "${text}" logits: ${JSON.stringify(logitsRow)}`);
-                    try {
-                      localSupersenseDebugLogits.push({
-                        tokenId: tokenId,
-                        text: text,
-                        local_idx: li,
-                        logits: logitsRow,
-                      });
-                    } catch (e) {
-                      // ignore push errors
-                    }
-                  }
-                }
-              } catch (e) {
-                // ignore logging errors
-              }
-
-              // Log extraction details: which B- tags create spans
-              console.log(`  [Extraction Details - B-tag spans only]`);
-              let bTagCount = 0;
-              for (let idx = localStart; idx < localEnd; idx++) {
-                const tag = fixedSupersense[idx];
-                const tokenId = batchTokens[idx]?.tokenId ?? idx;
-                const text = batchTokens[idx]?.text ?? '[UNKNOWN]';
-
-                if (tag.startsWith('B-')) {
-                  const [, category] = tag.split('-');
-                  let endIdx = idx + 1;
-
-                  // Extend span with matching I- tags
-                  while (endIdx < fixedSupersense.length) {
-                    const nextTag = fixedSupersense[endIdx];
-                    if (nextTag.startsWith('I-')) {
-                      const [, nextCat] = nextTag.split('-');
-                      if (nextCat === category) {
-                        endIdx++;
-                      } else {
-                        break;
-                      }
-                    } else {
-                      break;
-                    }
-                  }
-
-                  const endTokenId = batchTokens[endIdx - 1]?.tokenId ?? tokenId;
-                  const spanTexts = batchTokens.slice(idx, endIdx).map(t => t.text).join(' ');
-                  console.log(`    B-${bTagCount++}: tokenIds=[${tokenId}-${endTokenId}] category="${category}" text="${spanTexts}"`);
-                } else if (tag === 'O') {
-                  // O tags don't create spans
-                } else if (tag.startsWith('I-')) {
-                  // Log orphan I- tags (these should NOT create spans)
-                  const prevTag = idx > localStart ? fixedSupersense[idx - 1] : 'O';
-                  const prevCategory = prevTag.startsWith('I-') ? prevTag.split('-')[1] : null;
-                  const currentCategory = tag.split('-')[1];
-                  const isOrphan = !prevTag.startsWith('B-') || prevCategory !== currentCategory;
-                  if (isOrphan) {
-                    console.log(`    Orphan I-: tokenId=${tokenId} category="${currentCategory}" text="${text}" (NOT EXTRACTED)`);
-                  }
-                }
-              }
-            }
-          }
-        }
-
+        // supersense debug logging removed
         const supersenseAnnotations = this.advancedPostProcessor.applySupersenseAnnotations(
           batchTokens,
           fixedSupersense
         );
-
-        // Debug: Log extracted supersense spans
-        if (debugRanges.some(range => {
-          const globalStartToken = batchTokens[0]?.tokenId ?? 0;
-          const globalEndToken = batchTokens[tokenCount - 1]?.tokenId ?? 0;
-          return globalStartToken <= range.end && globalEndToken >= range.start;
-        })) {
-          console.log(`  [Extracted Supersense Spans]`);
-          supersenseAnnotations.forEach((ann, idx) => {
-            console.log(`    Span ${idx}: tokenIds=[${ann[0]}-${ann[1]-1}] category="${ann[2]}" text="${ann[3]}"`);
-          });
-        }
 
         supersenseAnnotations.forEach(annotation => {
           const startIndex = annotation[0];
@@ -1163,57 +848,18 @@ export class EntityTagger {
       }
 
       // Process event logits via argmax for binary event classification (non-event vs event)
-      // Event logits are computed for original tokens after removing [CLS]
-      // These correspond to: [token0, token1, ..., tokenN-1, SEP]
-      // Python code: for col in range(batched_orig_token_lens[b][row] - 1)
-      // where batched_orig_token_lens[b][row] includes [CLS], tokens, and [SEP]
-      // So for N original tokens: range(N + 2 - 1) = range(N + 1), processing 0 to N (inclusive)
       if (eventLogits) {
         const eventLogitsBatch = eventLogits[i];
-        const eventTokenIds: number[] = [];
-        const debugEventRanges = [
-          { tokenId: 59278, text: 'says' },
-          { tokenId: 59539, text: 'saying' },
-          { tokenId: 61149, text: 'come' },
-          { tokenId: 66049, text: 'saw' },
-          { tokenId: 66091, text: 'forget' },
-          { tokenId: 74510, text: 'heard' },
-          { tokenId: 74512, text: 'speak' },
-          { tokenId: 87334, text: 'heard' },
-        ];
-
-        // Process tokens 0 to tokenCount (inclusive), matching Python's range(tokenCount + 1) behavior
         for (let tokenIdx = 0; tokenIdx <= tokenCount && tokenIdx < eventLogitsBatch.length; tokenIdx++) {
           const logitPair = eventLogitsBatch[tokenIdx];
           if (logitPair && logitPair.length >= 2) {
             const [logit0, logit1] = logitPair;
-            if (logit1 > logit0) {
-              if (tokenIdx < tokenCount) {
-                const token = batchTokens[tokenIdx];
-                if (token) {
-                  eventTokenIds.push(token.tokenId);
-                  allEvents.add(token.tokenId);
-
-                  // Debug: Log if this is one of the problematic tokens
-                  const debugEntry = debugEventRanges.find(d => d.tokenId === token.tokenId);
-                  if (debugEntry) {
-                    console.log(`\n[DEBUG Event] Token ${token.tokenId} "${debugEntry.text}": event=true (logits: ${logit0.toFixed(4)} vs ${logit1.toFixed(4)})`);
-                  }
-                }
+            if (logit1 > logit0 && tokenIdx < tokenCount) {
+              const token = batchTokens[tokenIdx];
+              if (token) {
+                allEvents.add(token.tokenId);
               }
             }
-          }
-        }
-
-        // Debug: Log event extraction summary for this batch
-        const globalStartToken = batchTokens[0]?.tokenId ?? 0;
-        const globalEndToken = batchTokens[tokenCount - 1]?.tokenId ?? 0;
-        const debugTokensInBatch = debugEventRanges.filter(d => d.tokenId >= globalStartToken && d.tokenId <= globalEndToken);
-        if (debugTokensInBatch.length > 0) {
-          console.log(`  [Event batch summary] tokens ${globalStartToken}-${globalEndToken}: extracted ${eventTokenIds.length} events`);
-          for (const debugToken of debugTokensInBatch) {
-            const isEvent = eventTokenIds.includes(debugToken.tokenId);
-            console.log(`    Token ${debugToken.tokenId} "${debugToken.text}": ${isEvent ? 'EVENT' : 'not-event'}`);
           }
         }
       }
@@ -1223,11 +869,6 @@ export class EntityTagger {
       entities: allEntities,
       supersense: allSupersense,
       events: allEvents,
-      wnBatchShape,
-      supersense_debug_logits: localSupersenseDebugLogits,
-      batch_debug_details: localBatchDebugs.length > 0 ? localBatchDebugs : undefined,
-      paddedWordpieceLen: paddedWordpieceLen,
-      paddedOriginalLen: paddedOriginalLen,
     };
   }
 

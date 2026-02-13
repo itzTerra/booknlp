@@ -100,7 +100,7 @@ export interface BookNLPResult {
   entities: EntityAnnotation[];
   supersense: SupersenseAnnotation[];
   timing: Record<string, any>;
-  _debug?: Record<string, any>;
+  // debug payload removed
 }
 
 export type ExecutionProvider = 'wasm' | 'webgl' | 'webgpu';

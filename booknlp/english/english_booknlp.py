@@ -4,7 +4,7 @@ import sys
 import spacy
 from dataclasses import dataclass, asdict
 from booknlp.common.pipelines import SpacyPipeline
-from booknlp.common.logger import get_logger, get_logs, clear_logs
+from booknlp.common.logger import get_logger
 from booknlp.english.entity_tagger import LitBankEntityTagger
 from os.path import join
 import os
@@ -238,14 +238,6 @@ class EnglishBookNLP:
             # Initialize optional outputs to avoid NameError when features disabled
             entity_vals: Dict[str, Any] = {"entities": []}
 
-            debug_info: Dict[str, Any] = {
-                "raw_tokens_count": len(tokens),
-                "raw_tokens_sample": [
-                    {"text": t.text, "id": t.token_id, "sent_id": t.sentence_id}
-                    for t in list(tokens)[:5]
-                ],
-            }
-
             if self.config.verbose:
                 self.logger.info(
                     "--- spacy: %.3f seconds ---" % (time.time() - start_time)
@@ -258,7 +250,6 @@ class EnglishBookNLP:
                     doEvent=self.doEvent,
                     doEntities=self.doEntities,
                     doSS=self.doSS,
-                    debug_info=debug_info,
                 )
                 entity_vals["entities"] = sorted(entity_vals["entities"])
                 if self.doSS and out_folder is not None:
@@ -361,13 +352,6 @@ class EnglishBookNLP:
                 entities=entity_vals["entities"] if self.doEntities else [],
                 supersense=entity_vals["supersense"] if self.doSS else [],
                 timing={"elapsed": elapsed} if elapsed is not None else {},
-                _debug=debug_info,
             )
-            # Attach collected logger messages to the debug output and then clear buffer
-            try:
-                result._debug["logs"] = get_logs()
-            except Exception:
-                result._debug["logs"] = []
-            finally:
-                clear_logs()
+            # debug collection removed; no logs attached to results
             return result

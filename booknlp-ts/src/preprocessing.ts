@@ -218,31 +218,7 @@ export class Tokenizer {
     return 1 + wordTokens.length;  // [CAP] (1) + lowercase word tokens
   }
 
-  debugEncodeToken(text: string): { prepared: string; ids: number[]; tokens: string[] } {
-    this.ensureInitialized();
 
-    const firstChar = text[0];
-    const isCapitalized = firstChar && firstChar.toLowerCase() !== firstChar;
-
-    if (isCapitalized) {
-      // Match actual tokenizeTokens behavior: [CAP] token + word tokens
-      const lowercased = text.toLowerCase();
-      const wordTokens = this.wordpieceTokenize(lowercased);
-      const wordIds = this.tokensToIds(wordTokens);
-      // Use a stable vocab id for [CAP] (fallback to 30522)
-      const capId = this.vocab.get(SPECIAL_TOKENS.CAP) ?? 30522;
-      const ids = [capId, ...wordIds];
-      const prepared = `[CAP] ${lowercased}`;
-      return { prepared, ids, tokens: [SPECIAL_TOKENS.CAP, ...wordTokens] };
-    }
-
-    // Non-capitalized: encode as-is
-    const prepared = text;
-    const tokens = this.wordpieceTokenize(prepared);
-    const ids = this.tokensToIds(tokens);
-
-    return { prepared, ids, tokens };
-  }
 
   tokenize(spaCyContext: SpaCyContext): BertTokenizationResult {
     return this.tokenizeTokens(spaCyContext.tokens);
@@ -393,19 +369,12 @@ export class Tokenizer {
       return 0;
     }
 
-    // Use the same deterministic encoder used by batching so counts match
-    // the actual tokenization output. This reduces mismatch risk between
-    // the Python tokenizer and this JS implementation.
-    try {
-      const enc = this.debugEncodeToken(text);
-      return enc.ids.length;
-    } catch (e) {
-      // Fallback: previous count logic
-      return this.countCapTokensSeparately(text);
-    }
+    // Deterministic count: count [CAP] specially and then wordpiece-tokenize
+    return this.countCapTokensSeparately(text);
   }
 
 }
+
 
 export function convertSpaCyToTokens(
   spaCyContext: SpaCyContext,
