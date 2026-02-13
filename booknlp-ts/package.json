@@ -1,6 +1,6 @@
 {
     "name": "booknlp-ts",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "description": "TypeScript port of entity, event, and supersense extraction pipelines of BookNLP (spaCy extraction excluded)",
     "type": "module",
     "main": "./dist/booknlp.umd.cjs",
