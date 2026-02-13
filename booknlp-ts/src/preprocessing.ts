@@ -443,15 +443,6 @@ export function convertSpaCyToTokens(
     for (let i = sentence.start; i < sentence.end; i++) {
       const spaCyToken = spaCyContext.tokens[i];
 
-      if (i > 0 && spaCyContext.paragraphs) {
-        for (const para of spaCyContext.paragraphs) {
-          if (i === para.start && para.start > 0) {
-            currentParagraphId++;
-            break;
-          }
-        }
-      }
-
       if (isWhitespaceToken(spaCyToken.text)) {
         skippedGlobal += 1;
         skippedInSentence += 1;

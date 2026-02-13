@@ -25,15 +25,14 @@ export interface CRFTransitions {
   supersense_stop_idx: number;
 }
 
-export interface SentenceBoundary {
-  start: number;
-  end: number;
-}
+export type SentToken = {
+  text: string;
+  pos_: string;
+  dep_: string;
+  children: SentToken[];
+};
 
-export interface ParagraphBoundary {
-  start: number;
-  end: number;
-}
+export type SpacySents = { root: SentToken, start: number, end: number }[];
 
 export interface NounChunk {
   start: number;
@@ -43,9 +42,8 @@ export interface NounChunk {
 
 export interface SpaCyContext {
   tokens: SpaCyToken[];
-  sentences: SentenceBoundary[];
-  paragraphs?: ParagraphBoundary[];
-  nounChunks?: NounChunk[];
+  sentences: SpacySents;
+  nounChunks: NounChunk[];
 }
 
 export interface Token {
@@ -96,7 +94,7 @@ export type SupersenseAnnotation = [number, number, string, string];
 
 export interface BookNLPResult {
   tokens: Token[];
-  sents: any[];
+  sents: SpacySents;
   nounChunks: any[];
   entities: EntityAnnotation[];
   supersense: SupersenseAnnotation[];
