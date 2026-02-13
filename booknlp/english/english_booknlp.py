@@ -6,6 +6,7 @@ from dataclasses import dataclass, asdict
 from booknlp.common.pipelines import SpacyPipeline
 from booknlp.common.logger import get_logger, get_logs, clear_logs
 from booknlp.english.entity_tagger import LitBankEntityTagger
+from booknlp.english.name_coref import NameCoref
 from os.path import join
 import os
 import time
@@ -164,6 +165,10 @@ class EnglishBookNLP:
 
             if self.doEntities:
                 self.entityTagger = LitBankEntityTagger(self.entityPath, tagsetPath)
+                aliasPath = pkg_resources.resource_filename(
+                    __name__, "data/aliases.txt"
+                )
+                self.name_resolver = NameCoref(aliasPath)
 
             self.tagger = SpacyPipeline(spacy_nlp)
 
@@ -313,15 +318,34 @@ class EnglishBookNLP:
 
             start_time = time.time()
             if self.doEntities:
-                for i, (start, end, cat, text) in enumerate(entity_vals["entities"]):
+                entities = entity_vals["entities"]
+                in_quotes = []
+
+                for start, end, cat, text in entities:
+                    if tokens[start].inQuote or tokens[end].inQuote:
+                        in_quotes.append(1)
+                    else:
+                        in_quotes.append(0)
+
+                # Create entity for first-person narrator, if present
+                refs = self.name_resolver.cluster_narrator(entities, in_quotes, tokens)
+
+                # Cluster non-PER PROP mentions that are identical
+                refs = self.name_resolver.cluster_identical_propers(entities, refs)
+
+                # Cluster mentions of named people
+                refs = self.name_resolver.cluster_only_nouns(entities, refs, tokens)
+
+                for i, (start, end, cat, text) in enumerate(entities):
                     ent_type = cat.split("_")[1]
                     ent_prop = cat.split("_")[0]
-                    entity_vals["entities"][i] = {
+                    entities[i] = {
                         "start_token": start,
                         "end_token": end,
                         "cat": ent_type,
                         "text": text,
                         "prop": ent_prop,
+                        "coref": refs[i],
                     }
             if self.doEntities and out_folder is not None:
                 # Write entities

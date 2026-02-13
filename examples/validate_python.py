@@ -92,6 +92,6 @@ if __name__ == "__main__":
     with open(input_file, "r", encoding="utf-8") as f:
         test_text = f.read()
 
-    output_file = "python_output.json"
+    output_file = "output/python_output.json"
 
     process_with_python_booknlp(test_text.strip(), output_file)

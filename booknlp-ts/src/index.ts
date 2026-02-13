@@ -1,5 +1,5 @@
-import { SpaCyContext, BookNLPConfig, BookNLPResult } from 'types';
-import { EnglishBookNLP, createPipeline } from 'english-booknlp';
+import { SpaCyContext, BookNLPConfig, BookNLPResult } from './types';
+import { EnglishBookNLP, createPipeline } from './english-booknlp';
 
 /**
  * BookNLP TypeScript implementation for browser environment.
@@ -35,11 +35,12 @@ export class BookNLP {
   }
 }
 
-export * from 'types';
-export * from 'validation';
-export * from 'preprocessing';
-export * from 'tagger-controller';
-export * from 'entity-tagger';
-export * from 'english-booknlp';
-export * from 'crf-decoder';
-export * from 'advanced-postprocessor';
+export * from './types';
+export * from './validation';
+export * from './preprocessing';
+export * from './tagger-controller';
+export * from './entity-tagger';
+export * from './english-booknlp';
+export * from './crf-decoder';
+export * from './advanced-postprocessor';
+export * from './name-coref';

@@ -9,7 +9,7 @@
  * externally for maximum flexibility.
  */
 
-import { CRFTransitions } from 'types';
+import { CRFTransitions } from './types';
 
 interface ViterbiResult {
   scores: number[];

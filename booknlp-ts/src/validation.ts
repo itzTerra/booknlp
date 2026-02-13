@@ -1,4 +1,4 @@
-import { SpaCyContext, SpaCyToken, BookNLPConfig, ValidationError } from 'types';
+import { SpaCyContext, SpaCyToken, BookNLPConfig, ValidationError } from './types';
 
 export class SpaCyValidationError extends Error {
   constructor(

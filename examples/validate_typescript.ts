@@ -141,8 +141,8 @@ async function main(): Promise<void> {
     }
   }
 
-  const minimalPath = path.join(__dirname, '..', 'examples', 'python_minimal.json');
-  const fullPath = path.join(__dirname, '..', 'examples', 'python_output.json');
+  const minimalPath = path.join(__dirname, '..', 'examples', 'output', 'python_minimal.json');
+  const fullPath = path.join(__dirname, '..', 'examples', 'output', 'python_output.json');
 
   let pythonOutputFile = pythonOutputFileArg || process.env.PYTHON_OUTPUT || (fs.existsSync(minimalPath) ? minimalPath : fullPath);
 
@@ -155,12 +155,7 @@ async function main(): Promise<void> {
   const spaCyContext = pythonOutput.spacy_context;
   const inputText = pythonOutput.input_text;
 
-  const outputDir = path.join(__dirname, '..', 'examples', 'output_typescript');
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
-
-  const outputFile = path.join(__dirname, '..', 'examples', 'typescript_output.json');
+  const outputFile = path.join(__dirname, '..', 'examples', 'output', 'typescript_output.json');
 
   await processWithTypescriptBookNLP(spaCyContext, inputText, outputFile);
 }

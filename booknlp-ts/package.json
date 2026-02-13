@@ -1,7 +1,7 @@
 {
     "name": "booknlp-ts",
-    "version": "1.0.0",
-    "description": "BookNLP TypeScript library for client-side NLP inference",
+    "version": "1.0.2",
+    "description": "TypeScript port of entity, event, and supersense extraction pipelines of BookNLP (spaCy extraction excluded)",
     "type": "module",
     "main": "./dist/booknlp.umd.cjs",
     "module": "./dist/booknlp.js",

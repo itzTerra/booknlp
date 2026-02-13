@@ -78,35 +78,36 @@ def compare_entities(python_entities: List, ts_entities: List) -> bool:
         print(
             f"⚠️  Entity count mismatch: Python={len(python_entities)}, TypeScript={len(ts_entities)}"
         )
+    else:
+        print(f"✓ Entity count matches: {len(python_entities)}")
 
-        # Find the specific difference
-        py_set = set()
-        ts_set = set()
+    # Find the specific difference
+    py_set = set()
+    ts_set = set()
 
-        for ent in python_entities:
-            start = ent.get("startToken", ent.get("start_token"))
-            end = ent.get("endToken", ent.get("end_token"))
-            cat = ent.get("cat")
-            py_set.add((start, end, cat))
+    for ent in python_entities:
+        start = ent.get("startToken", ent.get("start_token"))
+        end = ent.get("endToken", ent.get("end_token"))
+        cat = ent.get("cat")
+        coref = ent.get("coref", None)
+        py_set.add((start, end, cat, coref))
 
-        for ent in ts_entities:
-            start = ent.get("startToken", ent.get("start_token"))
-            end = ent.get("endToken", ent.get("end_token"))
-            cat = ent.get("cat")
-            ts_set.add((start, end, cat))
+    for ent in ts_entities:
+        start = ent.get("startToken", ent.get("start_token"))
+        end = ent.get("endToken", ent.get("end_token"))
+        cat = ent.get("cat")
+        coref = ent.get("coref", None)
+        ts_set.add((start, end, cat, coref))
 
-        extra_in_ts = ts_set - py_set
-        missing_in_ts = py_set - ts_set
+    extra_in_ts = ts_set - py_set
+    missing_in_ts = py_set - ts_set
 
-        if extra_in_ts:
-            print(f"  Extra in TypeScript ({len(extra_in_ts)}): {extra_in_ts}")
-        if missing_in_ts:
-            print(f"  Missing in TypeScript ({len(missing_in_ts)}): {missing_in_ts}")
+    if extra_in_ts:
+        print(f"  Extra in TypeScript ({len(extra_in_ts)}): {extra_in_ts}")
+    if missing_in_ts:
+        print(f"  Missing in TypeScript ({len(missing_in_ts)}): {missing_in_ts}")
 
-        return False
-
-    print(f"✓ Entity count matches: {len(python_entities)}")
-    return True
+    return len(extra_in_ts) == 0 and len(missing_in_ts) == 0
 
 
 def compare_supersense(python_supersense: List, ts_supersense: List) -> bool:
@@ -253,9 +254,9 @@ def main():
     )
     args = ap.parse_args()
 
-    examples_dir = Path(__file__).parent
+    output_dir = Path(__file__).parent / "output"
     global LOGFILE
-    LOGFILE = str(examples_dir / "compare_log.txt")
+    LOGFILE = str(output_dir / "compare_log.txt")
     # Reset log file
     try:
         open(LOGFILE, "w", encoding="utf-8").close()
@@ -266,15 +267,15 @@ def main():
         Path(args.python)
         if args.python
         else (
-            examples_dir / "python_minimal.json"
-            if (examples_dir / "python_minimal.json").exists()
-            else (examples_dir / "python_output.json")
+            output_dir / "python_minimal.json"
+            if (output_dir / "python_minimal.json").exists()
+            else (output_dir / "python_output.json")
         )
     )
     ts_output = (
         Path(args.typescript)
         if args.typescript
-        else (examples_dir / "typescript_output.json")
+        else (output_dir / "typescript_output.json")
     )
 
     if not python_output.exists():
