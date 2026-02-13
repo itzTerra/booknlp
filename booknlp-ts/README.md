@@ -2,17 +2,6 @@
 
 Browser-compatible TypeScript implementation of BookNLP for client-side NLP inference on long documents. This library provides complete entity recognition, supersense tagging, and event detection using pre-converted ONNX models running entirely in the browser via WebAssembly.
 
-## ✅ Implementation Status: COMPLETE (Browser-Ready)
-
-All core functionality has been implemented and optimized for browser environments:
-
-- ✅ **Entity Recognition**: 3-layer hierarchical LSTM-CRF with entity type classification (PER, LOC, FAC, GPE, ORG, VEH)
-- ✅ **Supersense Tagging**: WordNet-based semantic role annotation
-- ✅ **Event Detection**: Token-level event marker prediction
-- ✅ **ONNX Inference**: Full integration with ONNX Runtime Web for neural network inference
-- ✅ **WebAssembly Support**: Runs entirely in the browser without server dependencies
-- ✅ **Bundled Resources**: Data files packaged with the library for offline use
-
 ## Quick Start
 
 ### Installation
@@ -482,74 +471,6 @@ const result = await booknlp.process(spaCyContext);
 - **Performance**: Parallel processing of multiple sentences
 - **ONNX compatibility**: Matches Python implementation's batching strategy
 
-## Performance
-
-### Small Model (Current)
-- BERT: 4 layers, 256 hidden dimensions
-- Processing: ~500-1000 tokens/second (varies by device and execution provider)
-- Memory: ~100-200 MB browser memory
-
-### Execution Provider Performance
-
-| Provider | Speed       | Compatibility        | Notes                             |
-| -------- | ----------- | -------------------- | --------------------------------- |
-| WASM     | Baseline    | All browsers         | Universal fallback                |
-| WebGL    | 2-3x faster | Most modern browsers | GPU acceleration                  |
-| WebGPU   | 3-5x faster | Chrome/Edge 113+     | Best performance, limited support |
-
-### Timing Breakdown
-
-```typescript
-console.log(result.timing);
-// {
-//   token_conversion: 5.2,      // ms
-//   tagger_inference: 1247.8,   // ms (ONNX inference)
-//   total: 1253.0               // ms
-// }
-```
-
-## Validation
-
-A comprehensive validation suite compares Python and TypeScript outputs:
-
-```bash
-cd ../validation
-./run_validation.sh
-```
-
-This runs both implementations on identical input and reports:
-- ✅ Token count matches
-- ✅ Entity boundaries match
-- ✅ Entity categories match
-- ✅ Supersense annotations match
-- ✅ Event markers match
-
-See `../validation/README.md` for details.
-
-## Testing
-
-### Unit Tests
-
-```bash
-npm test
-```
-
-Tests cover:
-- Input validation (`validation.test.ts`)
-- BIO tag fixing (`postprocessor.test.ts`)
-- Entity extraction
-- Transform matrix operations
-
-### Integration Tests
-
-```bash
-cd ../validation
-python3 validate_python.py
-npm run build
-node validate_typescript.js
-python3 compare_outputs.py
-```
-
 ## Dependencies
 
 ### Runtime Dependencies
@@ -605,82 +526,6 @@ import { BookNLP } from 'booknlp-ts';
 </script>
 ```
 
-### Linting
-
-```bash
-npm run lint
-```
-
-## Limitations
-
-### Current Limitations
-
-1. **Requires SpaCy preprocessing**: Cannot process raw text directly (requires external spaCy tokenization)
-2. **Browser-only**: This version is optimized for browser environments
-3. **Single-document processing**: No batch API for multiple documents
-4. **WebGPU support limited**: Only available in Chrome/Edge 113+
-
-### Future Enhancements
-
-- [ ] Integrate spaCy preprocessing in browser (via Pyodide or similar)
-- [ ] Streaming/incremental processing for very long documents
-- [ ] Quote and coreference chain extraction
-- [ ] Big model variant support
-- [ ] Node.js compatibility layer
-
-## Comparison: Python vs TypeScript
-
-| Feature             | Python       | TypeScript   | Status                 |
-| ------------------- | ------------ | ------------ | ---------------------- |
-| Entity recognition  | ✅            | ✅            | Equivalent             |
-| Supersense tagging  | ✅            | ✅            | Equivalent             |
-| Event detection     | ✅            | ✅            | Equivalent             |
-| ONNX inference      | ✅            | ✅            | Equivalent             |
-| SpaCy preprocessing | ✅ Integrated | ⚠️ External   | Requires Python        |
-| Raw text input      | ✅            | ❌            | Requires SpaCy context |
-| Model conversion    | ✅ Native     | ⚠️ Via Python | ONNX export            |
-
-## Troubleshooting
-
-### Error: "ONNX model not loaded"
-
-Ensure the model path is correct and the file exists:
-```typescript
-const config = {
-  modelPath: '/absolute/path/to/model.onnx',
-  // ...
-};
-```
-
-### Error: "Validation failed"
-
-Check that all required `SpaCyToken` fields are present:
-```typescript
-import { validateSpaCyContext } from './dist/validation';
-
-const errors = validateSpaCyContext(spaCyContext);
-if (errors.length > 0) {
-  console.error('Validation errors:', errors);
-}
-```
-
-### Memory Issues
-
-For very long documents, consider:
-1. Processing in smaller chunks
-2. Using the small model variant
-3. Increasing Node.js heap size: `node --max-old-space-size=8192`
-
-## Contributing
-
-When modifying the TypeScript implementation:
-
-1. **Maintain type safety**: No `any` types without justification
-2. **Add tests**: Unit tests for new functionality
-3. **Run validation**: Ensure Python vs TypeScript equivalence
-4. **Document changes**: Update README and type definitions
-5. **Follow conventions**: Use existing code style and patterns
-
 ## License
 
 Same as BookNLP (Python version).
@@ -692,10 +537,3 @@ Same as BookNLP (Python version).
 - Transformers.js: https://xenova.github.io/transformers.js/
 - BERT: https://arxiv.org/abs/1810.04805
 - CRF: https://en.wikipedia.org/wiki/Conditional_random_field
-
-## Support
-
-For issues or questions:
-- Python BookNLP: https://github.com/dbamman/book-nlp/issues
-- TypeScript implementation: See `TYPESCRIPT_IMPLEMENTATION.md` in project root
-- Validation: See `validation/README.md`

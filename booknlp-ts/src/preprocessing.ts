@@ -1,4 +1,4 @@
-import { AutoTokenizer, env } from '@huggingface/transformers';
+// import { AutoTokenizer, env } from '@huggingface/transformers';
 import { SpaCyContext, SpaCyToken, Token, BertTokenizationResult } from 'types';
 
 const SPECIAL_TOKENS = {
@@ -13,9 +13,9 @@ const SPECIAL_TOKENS = {
 const MAX_SUBWORD_LENGTH = 502;
 
 export class Tokenizer {
-  private tokenizer: any;
+  // private tokenizer: any;
   private initialized: boolean = false;
-  private static environmentConfigured: boolean = false;
+  // private static environmentConfigured: boolean = false;
   private vocab: Map<string, number> = new Map();
   private unkTokenId: number = 100;
   private clsTokenId: number = 101;
@@ -23,28 +23,28 @@ export class Tokenizer {
   private maxInputCharsPerWord: number = 100;
 
   async initialize(modelId: string): Promise<void> {
-    this.configureTransformersEnvironment();
+    // this.configureTransformersEnvironment();
     const normalizedModelId = this.normalizeModelId(modelId);
-    this.tokenizer = await AutoTokenizer.from_pretrained(normalizedModelId, {
-      legacy: true
-    });
+    // this.tokenizer = await AutoTokenizer.from_pretrained(normalizedModelId, {
+    //   legacy: true
+    // });
     await this.loadVocab(normalizedModelId);
 
     // Ensure [CAP] exists in the vocab mapping. Python adds [CAP] via
     // tokenizer.add_tokens(...). If add_tokens is available use it; otherwise
     // ensure our loaded `vocab.txt` contains a mapping for [CAP], inserting a
     // fallback id (30522) when missing so counts/ids remain stable.
-    if (this.tokenizer.add_tokens && typeof this.tokenizer.add_tokens === 'function') {
-      try {
-        console.warn('[Tokenizer] Calling add_tokens([CAP])...');
-        const result = this.tokenizer.add_tokens([SPECIAL_TOKENS.CAP], { special_tokens: true });
-        console.warn(`[Tokenizer] add_tokens returned: ${result}`);
-      } catch (e) {
-        console.warn('[Tokenizer] add_tokens failed, falling back to vocab mapping');
-      }
-    } else {
-      console.warn('[Tokenizer] add_tokens method not available; ensuring vocab mapping for [CAP]');
-    }
+    // if (this.tokenizer.add_tokens && typeof this.tokenizer.add_tokens === 'function') {
+    //   try {
+    //     console.warn('[Tokenizer] Calling add_tokens([CAP])...');
+    //     const result = this.tokenizer.add_tokens([SPECIAL_TOKENS.CAP], { special_tokens: true });
+    //     console.warn(`[Tokenizer] add_tokens returned: ${result}`);
+    //   } catch (e) {
+    //     console.warn('[Tokenizer] add_tokens failed, falling back to vocab mapping');
+    //   }
+    // } else {
+    //   console.warn('[Tokenizer] add_tokens method not available; ensuring vocab mapping for [CAP]');
+    // }
 
     // If `[CAP]` missing from loaded vocab, add a fallback id 30522.
     if (!this.vocab.has(SPECIAL_TOKENS.CAP)) {
@@ -52,12 +52,12 @@ export class Tokenizer {
     }
 
     // Debug: decode a common token id to inspect tokenizer if available
-    try {
-      const decoded = this.tokenizer.decode([this.vocab.get(SPECIAL_TOKENS.CAP) ?? 30522]);
-      console.warn(`[Tokenizer] Token ${this.vocab.get(SPECIAL_TOKENS.CAP) ?? 30522} decodes to: "${decoded}"`);
-    } catch (e) {
-      console.warn(`[Tokenizer] Failed to decode token for [CAP]: ${e}`);
-    }
+    // try {
+    //   const decoded = this.tokenizer.decode([this.vocab.get(SPECIAL_TOKENS.CAP) ?? 30522]);
+    //   console.warn(`[Tokenizer] Token ${this.vocab.get(SPECIAL_TOKENS.CAP) ?? 30522} decodes to: "${decoded}"`);
+    // } catch (e) {
+    //   console.warn(`[Tokenizer] Failed to decode token for [CAP]: ${e}`);
+    // }
 
     this.initialized = true;
   }
@@ -159,16 +159,16 @@ export class Tokenizer {
     return tokens.map(token => this.vocab.get(token) ?? this.unkTokenId);
   }
 
-  private configureTransformersEnvironment(): void {
-    if (Tokenizer.environmentConfigured) {
-      return;
-    }
+  // private configureTransformersEnvironment(): void {
+  //   if (Tokenizer.environmentConfigured) {
+  //     return;
+  //   }
 
-    env.allowLocalModels = false;
-    env.allowRemoteModels = true;
-    env.localModelPath = '';
-    Tokenizer.environmentConfigured = true;
-  }
+  //   env.allowLocalModels = false;
+  //   env.allowRemoteModels = true;
+  //   env.localModelPath = '';
+  //   Tokenizer.environmentConfigured = true;
+  // }
 
   private normalizeModelId(modelId: string): string {
     if (modelId.startsWith('http://') || modelId.startsWith('https://')) {
