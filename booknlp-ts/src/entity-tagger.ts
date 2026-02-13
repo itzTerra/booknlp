@@ -1,8 +1,8 @@
-import { SpaCyToken, Token, EntityAnnotation, SupersenseAnnotation, ResourceUrls as Resources, ExecutionProvider } from 'types';
-import { ONNXTaggerController } from 'tagger-controller';
-import { Tokenizer } from 'preprocessing';
-import { CRFDecoder } from 'crf-decoder';
-import { AdvancedPostProcessor } from 'advanced-postprocessor';
+import { SpaCyToken, Token, EntityAnnotation, SupersenseAnnotation, Resources as Resources, ExecutionProvider } from './types';
+import { ONNXTaggerController } from './tagger-controller';
+import { Tokenizer } from './preprocessing';
+import { CRFDecoder } from './crf-decoder';
+import { AdvancedPostProcessor } from './advanced-postprocessor';
 
 interface WordNetSense {
   [key: string]: number;
@@ -23,14 +23,14 @@ export class EntityTagger {
 
   constructor(
     modelPath: string,
-    resourceUrls: Resources,
+    resources: Resources,
     executionProviders: ExecutionProvider[] = ['wasm'],
     wasmPaths?: string | Record<string, string>
   ) {
     this.controller = new ONNXTaggerController(modelPath, executionProviders, wasmPaths);
     this.advancedPostProcessor = new AdvancedPostProcessor();
     this.crfDecoder = new CRFDecoder();
-    this.resources = resourceUrls;
+    this.resources = resources;
     this.tokenizer = new Tokenizer();
     this.modelId = modelPath;
     this.buildEntityCategoryMap();
@@ -38,13 +38,13 @@ export class EntityTagger {
 
   static async fromHuggingFace(
     repoId: string,
-    resourceUrls: Resources,
+    resources: Resources,
     executionProviders: ExecutionProvider[] = ['wasm'],
     wasmPaths?: string | Record<string, string>
   ): Promise<EntityTagger> {
     const tagger = new EntityTagger(
       repoId,
-      resourceUrls,
+      resources,
       executionProviders,
       wasmPaths
     );
@@ -103,20 +103,11 @@ export class EntityTagger {
     const supersenseContent = this.resources.supersenseTagset;
     const wordNetContent = this.resources.wordNet;
 
-    let crfTransitionsData: any;
-    try {
-      crfTransitionsData = typeof this.resources.crfTransitions === 'string'
-        ? JSON.parse(this.resources.crfTransitions)
-        : this.resources.crfTransitions;
-    } catch (e) {
-      throw new Error(`Failed to parse CRF transitions resource: ${(e as Error).message}`);
-    }
-
     this.loadTagsets(entityContent, supersenseContent);
     this.loadWordNetSenses(wordNetContent);
     // Initialize CRF decoder with transition matrices
     // Transitions define penalty scores for invalid tag sequences (e.g., I-PER after O)
-    this.crfDecoder.loadTransitions(crfTransitionsData);
+    this.crfDecoder.loadTransitions(this.resources.crfTransitions);
   }
 
   private async fetchText(url: string): Promise<string> {
@@ -807,6 +798,7 @@ export class EntityTagger {
             cat: entity.cat,
             text: entity.text,
             prop: entity.prop,
+            coref: -1 // Placeholder for coreference cluster ID, to be filled in later
           });
         });
       }

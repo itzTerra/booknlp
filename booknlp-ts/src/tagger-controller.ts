@@ -1,5 +1,5 @@
 import * as ort from 'onnxruntime-web';
-import { ExecutionProvider } from 'types';
+import { ExecutionProvider } from './types';
 import { PreTrainedModel } from '@huggingface/transformers';
 
 export interface InferenceConfig {

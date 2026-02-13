@@ -17,7 +17,7 @@
  * @see tagger.py for the corresponding Python implementation
  */
 
-import { Token, Entity, EntityAnnotation } from 'types';
+import { Token, Entity, EntityAnnotation } from './types';
 
 interface LayerTransformation {
   tags: string[];
@@ -403,6 +403,7 @@ export class AdvancedPostProcessor {
         cat: cat,
         text: entity.text ?? '',
         prop: prop,
+        coref: -1, // Placeholder for coreference cluster ID, to be filled in later
       };
     });
   }

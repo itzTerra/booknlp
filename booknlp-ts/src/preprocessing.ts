@@ -1,5 +1,5 @@
 // import { AutoTokenizer, env } from '@huggingface/transformers';
-import { SpaCyContext, SpaCyToken, Token, BertTokenizationResult } from 'types';
+import { SpaCyContext, SpaCyToken, Token, BertTokenizationResult } from './types';
 
 const SPECIAL_TOKENS = {
   CLS: '[CLS]',
@@ -164,9 +164,9 @@ export class Tokenizer {
   //     return;
   //   }
 
-  //   env.allowLocalModels = false;
-  //   env.allowRemoteModels = true;
-  //   env.localModelPath = '';
+  //   // env.allowLocalModels = false;
+  //   // env.allowRemoteModels = true;
+  //   // env.localModelPath = '';
   //   Tokenizer.environmentConfigured = true;
   // }
 

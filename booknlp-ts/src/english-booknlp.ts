@@ -1,14 +1,15 @@
-import { SpaCyContext, BookNLPConfig, BookNLPResult, Token, ResourceUrls } from 'types';
-import { validateSpaCyContext, validateBookNLPConfig, throwIfValidationErrors } from 'validation';
-import { convertSpaCyToTokens } from 'preprocessing';
-import { EntityTagger } from 'entity-tagger';
+import { SpaCyContext, BookNLPConfig, BookNLPResult, Token, Resources } from './types';
+import { validateSpaCyContext, validateBookNLPConfig, throwIfValidationErrors } from './validation';
+import { convertSpaCyToTokens } from './preprocessing';
+import { EntityTagger } from './entity-tagger';
+import { NameCoref } from './name-coref';
 
 import entityTagsetContent from './assets/data/entity_cat.tagset?raw';
 import supersenseTagsetContent from './assets/data/supersense.tagset?raw';
 import wordNetContent from './assets/data/wordnet.first.sense?raw';
-import crfTransitionsContent from './assets/data/crf_transitions.json?raw';
+import crfTransitionsContent from './assets/data/crf_transitions.json';
 
-function resolveResources(): ResourceUrls {
+function resolveResources(): Resources {
   return {
     entityTagset: entityTagsetContent,
     supersenseTagset: supersenseTagsetContent,
@@ -112,6 +113,35 @@ export class EnglishBookNLP {
           return a.text.localeCompare(b.text);
         })
         .map(({ fullLabel, ...e }) => e);
+
+      // compute in_quotes (1 if either boundary token is inside a quote else 0)
+      const in_quotes: number[] = [];
+      for (const ent of entities) {
+        const start = ent.startToken;
+        const end = ent.endToken;
+        const startIn = this.tokens[start]?.inQuote ?? false;
+        const endIn = this.tokens[end]?.inQuote ?? false;
+        in_quotes.push(startIn || endIn ? 1 : 0);
+      }
+
+      // run name clustering routines (narrator, identical propers, only-nouns)
+      const nameResolver = new NameCoref();
+      const tupleEntities: Array<[number, number, string, string]> = entities.map((e) => [
+        e.startToken,
+        e.endToken,
+        `${e.prop}_${e.cat}`,
+        e.text,
+      ]);
+
+      let refs: number[] = new Array(entities.length).fill(-1);
+      refs = nameResolver.cluster_narrator(tupleEntities, in_quotes, this.tokens);
+      refs = nameResolver.cluster_identical_propers(tupleEntities, refs);
+      refs = nameResolver.cluster_only_nouns(tupleEntities, refs, this.tokens);
+
+      entities = entities.map((e, idx) => ({
+        ...e,
+        coref: refs[idx],
+      }));
     }
 
     let supersense: any[] = [];

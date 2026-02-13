@@ -89,6 +89,7 @@ export interface EntityAnnotation {
   cat: string;
   text: string;
   prop: string;
+  coref: number;
 }
 
 export type SupersenseAnnotation = [number, number, string, string];
@@ -105,11 +106,11 @@ export interface BookNLPResult {
 
 export type ExecutionProvider = 'wasm' | 'webgl' | 'webgpu';
 
-export interface ResourceUrls {
+export interface Resources {
   entityTagset: string;
   supersenseTagset: string;
   wordNet: string;
-  crfTransitions: string;
+  crfTransitions: CRFTransitions;
 }
 
 export interface BookNLPConfig {
