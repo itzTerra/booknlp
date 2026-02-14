@@ -98,8 +98,6 @@ export interface BookNLPResult {
   nounChunks: any[];
   entities: EntityAnnotation[];
   supersense: SupersenseAnnotation[];
-  timing: Record<string, any>;
-  // debug payload removed
 }
 
 export type ExecutionProvider = 'wasm' | 'webgl' | 'webgpu';

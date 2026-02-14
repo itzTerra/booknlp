@@ -1,4 +1,4 @@
-import { SpaCyContext, BookNLPConfig, BookNLPResult, Token, Resources } from './types';
+import { SpaCyContext, BookNLPConfig, BookNLPResult, Token, Resources, type ProgressCallback } from './types';
 import { validateSpaCyContext, validateBookNLPConfig, throwIfValidationErrors } from './validation';
 import { convertSpaCyToTokens } from './preprocessing';
 import { EntityTagger } from './entity-tagger';
@@ -22,7 +22,6 @@ export class EnglishBookNLP {
   private config: BookNLPConfig;
   private entityTagger: EntityTagger;
   private tokens: Token[] = [];
-  private timing: Record<string, number> = {};
   private initialized: boolean = false;
 
   constructor(config: BookNLPConfig) {
@@ -42,8 +41,8 @@ export class EnglishBookNLP {
     );
   }
 
-  async initialize(): Promise<void> {
-    await this.entityTagger.initialize();
+  async initialize(progressCallback?: ProgressCallback): Promise<void> {
+    await this.entityTagger.initialize(progressCallback);
     this.initialized = true;
   }
 
@@ -56,23 +55,15 @@ export class EnglishBookNLP {
   async process(spaCyContext: SpaCyContext): Promise<BookNLPResult> {
     this.ensureInitialized();
 
-    const startTime = performance.now();
-
     const contextErrors = validateSpaCyContext(spaCyContext);
     throwIfValidationErrors(contextErrors);
 
-    const conversionTime = performance.now();
     this.tokens = convertSpaCyToTokens(spaCyContext);
-    this.timing['token_conversion'] = performance.now() - conversionTime;
 
-    // Debug output removed
-
-    const taggerTime = performance.now();
     const taggerResults = await this.entityTagger.tag(
       this.tokens,
       spaCyContext.tokens,
     );
-    this.timing['tagger_inference'] = performance.now() - taggerTime;
 
     // ignore any debug payloads from tagger
 
@@ -141,8 +132,6 @@ export class EnglishBookNLP {
       supersense = taggerResults.supersense;
     }
 
-    this.timing['total'] = performance.now() - startTime;
-
     // Extract noun chunks from spaCy context if available.
     // Python obtains these from spaCy's doc.noun_chunks.
     // Reference: booknlp/common/pipelines.py:184 and pipelines.py:tag() returning doc.noun_chunks
@@ -154,13 +143,12 @@ export class EnglishBookNLP {
       nounChunks,
       entities: entities,
       supersense: supersense,
-      timing: this.timing,
     };
   }
 }
 
-export async function createPipeline(config: BookNLPConfig): Promise<EnglishBookNLP> {
+export async function createPipeline(config: BookNLPConfig, progressCallback?: ProgressCallback): Promise<EnglishBookNLP> {
   const pipeline = new EnglishBookNLP(config);
-  await pipeline.initialize();
+  await pipeline.initialize(progressCallback);
   return pipeline;
 }

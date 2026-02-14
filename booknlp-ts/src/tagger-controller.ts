@@ -1,5 +1,5 @@
 import * as ort from 'onnxruntime-web';
-import { ExecutionProvider } from './types';
+import { ExecutionProvider, type ProgressCallback } from './types';
 import { PreTrainedModel } from '@huggingface/transformers';
 
 export interface InferenceConfig {
@@ -52,21 +52,24 @@ export class ONNXTaggerController {
     this.wasmPaths = wasmPaths;
   }
 
-  async loadModel(): Promise<void> {
+  async loadModel(progressCallback?: ProgressCallback): Promise<void> {
     const resolvedUrl = this.getHuggingFaceUrl(this.modelPath);
     try {
       if (this.wasmPaths) {
         ort.env.wasm.wasmPaths = this.wasmPaths;
       }
 
-      // const executionProviders = this.executionProviders.length > 0 ? this.executionProviders : ['wasm'];
-      // this.onnxSession = await ort.InferenceSession.create(resolvedUrl, { executionProviders });
       this.onnxSession = (await PreTrainedModel.from_pretrained(this.modelPath, {
         subfolder: 'onnx',
         dtype: "fp32",
         session_options: {
           executionProviders: this.executionProviders
-        }
+        },
+        progress_callback: progressCallback ? (data: any) => {
+          if (data.progress !== undefined && data.file.endsWith(".onnx")) {
+            progressCallback?.(data.progress);
+          }
+        } : undefined
         // session_options: {
         //   externalData: [
         //     {
@@ -83,10 +86,6 @@ export class ONNXTaggerController {
 
   private getHuggingFaceUrl(repoId: string): string {
     return `https://huggingface.co/${repoId}/resolve/main/onnx/model.onnx`;
-  }
-
-  private toBigInt64Array(values: number[]): BigInt64Array {
-    return BigInt64Array.from(values.map(value => BigInt(value)));
   }
 
   private toBigInt64Array2D(values: number[][]): BigInt64Array {
