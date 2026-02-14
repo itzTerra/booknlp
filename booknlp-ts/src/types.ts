@@ -98,7 +98,6 @@ export interface BookNLPResult {
   nounChunks: any[];
   entities: EntityAnnotation[];
   supersense: SupersenseAnnotation[];
-  timing: Record<string, any>;
   _debug?: Record<string, any>;
 }
 

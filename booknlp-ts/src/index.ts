@@ -24,15 +24,14 @@ import { env } from '@huggingface/transformers';
 export class BookNLP {
   private pipeline: EnglishBookNLP | null = null;
 
-  async initialize(config: BookNLPConfig, progress?: ProgressCallback): Promise<void> {
+  async initialize(config: BookNLPConfig, progressCallback?: ProgressCallback): Promise<void> {
     // Install global cached fetch which will route all resource loads through
     // the cache service and emit progress updates via the provided callback.
     if (!config.cacheName) {
       config.cacheName = 'booknlp-resources-v1';
     }
     env.cacheKey = config.cacheName;
-    installGlobalFetch(progress, config.cacheName);
-    this.pipeline = await createPipeline(config);
+    this.pipeline = await createPipeline(config, progressCallback);
   }
 
   async process(spaCyContext: SpaCyContext): Promise<BookNLPResult> {

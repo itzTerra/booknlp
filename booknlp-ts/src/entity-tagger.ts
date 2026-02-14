@@ -1,4 +1,4 @@
-import { SpaCyToken, Token, EntityAnnotation, SupersenseAnnotation, Resources as Resources, ExecutionProvider } from './types';
+import { SpaCyToken, Token, EntityAnnotation, SupersenseAnnotation, Resources as Resources, ExecutionProvider, type ProgressCallback } from './types';
 import { ONNXTaggerController } from './tagger-controller';
 import { Tokenizer } from './preprocessing';
 import { CRFDecoder } from './crf-decoder';
@@ -110,24 +110,6 @@ export class EntityTagger {
     this.crfDecoder.loadTransitions(this.resources.crfTransitions);
   }
 
-  private async fetchText(url: string): Promise<string> {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to load resource: ${url}`);
-    }
-
-    return response.text();
-  }
-
-  private async fetchJson(url: string): Promise<any> {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to load resource: ${url}`);
-    }
-
-    return response.json();
-  }
-
   private buildEntityCategoryMap(): void {
     const patterns = [
       { prefix: 'PROP_PER', category: 'PER', propType: 'PROP' },
@@ -157,9 +139,9 @@ export class EntityTagger {
     });
   }
 
-  async initialize(): Promise<void> {
+  async initialize(progressCallback?: ProgressCallback): Promise<void> {
     await Promise.all([
-      this.controller.loadModel(),
+      this.controller.loadModel(progressCallback),
       this.loadResources(),
       this.tokenizer.initialize(this.modelId),
     ]);
