@@ -1,6 +1,5 @@
 import { SpaCyContext, BookNLPConfig, BookNLPResult, ProgressCallback } from './types';
 import { EnglishBookNLP, createPipeline } from './english-booknlp';
-import { installGlobalFetch } from './cache-service';
 import { env } from '@huggingface/transformers';
 
 /**
@@ -52,4 +51,3 @@ export * from './english-booknlp';
 export * from './crf-decoder';
 export * from './advanced-postprocessor';
 export * from './name-coref';
-export { installGlobalFetch, clearCache, hasCached } from './cache-service';

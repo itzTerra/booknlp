@@ -1,5 +1,4 @@
 import { BookNLP } from '../index';
-import { clearCache } from '../cache-service';
 
 const logEl = document.getElementById('log') as HTMLPreElement;
 const progressEl = document.getElementById('progress') as HTMLElement;
@@ -33,13 +32,6 @@ initBtn.addEventListener('click', async () => {
     log('Initialization failed', e);
     initBtn.disabled = false;
   }
-});
-
-clearBtn.addEventListener('click', async () => {
-  log('Clearing cache...');
-  await clearCache();
-  log('Cache cleared');
-  setProgress(0);
 });
 
 // expose helpers for manual testing in console
