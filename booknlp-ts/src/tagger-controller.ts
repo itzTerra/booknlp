@@ -45,7 +45,7 @@ export class ONNXTaggerController {
   constructor(
     modelPath: string,
     executionProviders: ExecutionProvider[] = ['wasm'],
-    wasmPaths?: string | Record<string, string>
+    wasmPaths?: string | Record<string, string>,
   ) {
     this.modelPath = modelPath;
     this.executionProviders = executionProviders;
@@ -64,6 +64,9 @@ export class ONNXTaggerController {
       this.onnxSession = (await PreTrainedModel.from_pretrained(this.modelPath, {
         subfolder: 'onnx',
         dtype: "fp32",
+        session_options: {
+          executionProviders: this.executionProviders
+        }
         // session_options: {
         //   externalData: [
         //     {

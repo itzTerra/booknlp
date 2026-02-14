@@ -29,15 +29,7 @@ export class EnglishBookNLP {
     const configErrors = validateBookNLPConfig(config);
     throwIfValidationErrors(configErrors);
 
-    const normalizedPipeline = Array.isArray(config.pipeline)
-      ? config.pipeline
-      : config.pipeline.split(',').map((task) => task.trim()).filter(Boolean);
-
-    this.config = {
-      ...config,
-      pipeline: normalizedPipeline,
-    };
-
+    this.config = config;
     const resources = resolveResources();
     const modelPath = config.modelPath || 'Terraa/entities_google_bert_uncased_L-4_H-256_A-4-v1.0-ONNX';
     const executionProviders = config.executionProviders ?? ['wasm'];
@@ -46,7 +38,7 @@ export class EnglishBookNLP {
       modelPath,
       resources,
       executionProviders,
-      config.wasmPaths
+      config.cacheName,
     );
   }
 

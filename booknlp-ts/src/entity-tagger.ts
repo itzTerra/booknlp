@@ -25,7 +25,7 @@ export class EntityTagger {
     modelPath: string,
     resources: Resources,
     executionProviders: ExecutionProvider[] = ['wasm'],
-    wasmPaths?: string | Record<string, string>
+    wasmPaths?: string | Record<string, string>,
   ) {
     this.controller = new ONNXTaggerController(modelPath, executionProviders, wasmPaths);
     this.advancedPostProcessor = new AdvancedPostProcessor();
@@ -40,13 +40,13 @@ export class EntityTagger {
     repoId: string,
     resources: Resources,
     executionProviders: ExecutionProvider[] = ['wasm'],
-    wasmPaths?: string | Record<string, string>
+    wasmPaths?: string | Record<string, string>,
   ): Promise<EntityTagger> {
     const tagger = new EntityTagger(
       repoId,
       resources,
       executionProviders,
-      wasmPaths
+      wasmPaths,
     );
     await tagger.initialize();
     return tagger;
