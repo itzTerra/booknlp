@@ -1,6 +1,5 @@
 import { SpaCyContext, BookNLPConfig, BookNLPResult, Token, Resources, type ProgressCallback } from './types';
 import { validateSpaCyContext, validateBookNLPConfig, throwIfValidationErrors } from './validation';
-import { convertSpaCyToTokens } from './preprocessing';
 import { EntityTagger } from './entity-tagger';
 import { NameCoref } from './name-coref';
 
@@ -58,7 +57,9 @@ export class EnglishBookNLP {
     const contextErrors = validateSpaCyContext(spaCyContext);
     throwIfValidationErrors(contextErrors);
 
-    this.tokens = convertSpaCyToTokens(spaCyContext);
+    // spaCyContext.tokens is expected to already conform to the BookNLP `Token` shape
+    // (no conversion step). Use them directly as the pipeline tokens.
+    this.tokens = spaCyContext.tokens as Token[];
 
     const debugInfo: Record<string, any> = {
       raw_tokens_count: this.tokens.length,
@@ -69,10 +70,7 @@ export class EnglishBookNLP {
       })),
     };
 
-    const taggerResults = await this.entityTagger.tag(
-      this.tokens,
-      spaCyContext.tokens,
-    );
+    const taggerResults = await this.entityTagger.tag(this.tokens);
 
     if (taggerResults._debug) {
       Object.assign(debugInfo, taggerResults._debug);

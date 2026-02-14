@@ -6,45 +6,104 @@ Processes test input using Python BookNLP and outputs results to JSON for compar
 
 import sys
 import json
+from typing import List, Sequence
 import spacy
 from pathlib import Path
+
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from booknlp.booknlp import BookNLP
+from booknlp.common.pipelines import SpacyPipeline, Token
+
+
+def serialize_tag_result(toks: List[Token], sents: Sequence, noun_chunks: Sequence):
+    # Map internal Token -> SpaCyToken shape
+    mapped_tokens = []
+    for t in toks:
+        # Normalize morph to a plain dict
+        morph = {}
+        if t.morph is not None:
+            if hasattr(t.morph, "to_dict"):
+                morph = t.morph.to_dict()
+            else:
+                morph = dict(t.morph)
+
+        mapped_tokens.append(
+            {
+                "paragraphId": t.paragraph_id,
+                "sentenceId": t.sentence_id,
+                "withinSentenceId": t.within_sentence_id,
+                "tokenId": t.token_id,
+                "text": t.text,
+                "pos": t.pos,
+                "finePos": t.fine_pos,
+                "lemma": t.lemma,
+                "deprel": t.deprel,
+                "dephead": t.dephead,
+                "ner": t.ner if hasattr(t, "ner") else None,
+                "startByte": t.startByte,
+                "endByte": t.endByte,
+                "morph": morph,
+                "likeNum": t.like_num,
+                "isStop": t.is_stop,
+                "itext": getattr(t, "itext", t.text.casefold()),
+                "inQuote": getattr(t, "inQuote", False),
+                "event": getattr(t, "event", False),
+            }
+        )
+
+    # Build hierarchical sentence representation expected by frontend types.
+    def build_sent_token(tok, sent_start, sent_end, visited=None):
+        if visited is None:
+            visited = set()
+        if tok.i in visited:
+            return None
+        visited.add(tok.i)
+
+        children = []
+        for child in tok.children:
+            if child.i >= sent_start and child.i < sent_end:
+                child_node = build_sent_token(child, sent_start, sent_end, visited)
+                if child_node is not None:
+                    children.append(child_node)
+
+        return {
+            "text": tok.text,
+            "pos_": tok.pos_,
+            "dep_": tok.dep_,
+            "children": children,
+        }
+
+    sentences_out = []
+    for s in sents:
+        root = s.root
+        root_node = build_sent_token(root, s.start, s.end)
+        sentences_out.append({"root": root_node, "start": s.start, "end": s.end})
+
+    noun_chunks_out = [
+        {"start": nc.start, "end": nc.end, "text": nc.text} for nc in noun_chunks
+    ]
+
+    result = {
+        "tokens": mapped_tokens,
+        "sentences": sentences_out,
+        "nounChunks": noun_chunks_out,
+    }
+
+    return result
 
 
 def process_with_python_booknlp(text: str, output_file: str):
     """Process text with Python BookNLP and save results to JSON."""
 
     nlp = spacy.load("en_core_web_sm")
-    doc = nlp(text)
+    spacy_pipeline = SpacyPipeline(nlp)
+    tokens, sentences, noun_chunks = spacy_pipeline.tag(text)
 
-    spacy_context = {"tokens": [], "sentences": []}
-
-    for token in doc:
-        token_dict = {
-            "text": token.text,
-            "startByte": token.idx,
-            "endByte": token.idx + len(token.text),
-            "pos": token.pos_,
-            "finePos": token.tag_,
-            "lemma": token.lemma_,
-            "deprel": token.dep_,
-            "dephead": token.head.i,
-            "morph": {str(k): str(v) for k, v in token.morph.to_dict().items()},
-            "likeNum": token.like_num,
-            "isStop": token.is_stop,
-            "sentenceId": token.sent.start,
-            "withinSentenceId": token.i - token.sent.start,
-        }
-        spacy_context["tokens"].append(token_dict)
-
-    for sent in doc.sents:
-        spacy_context["sentences"].append({"start": sent.start, "end": sent.end})
+    spacy_context = serialize_tag_result(tokens, sentences, noun_chunks)
 
     model_params = {"pipeline": "entity,supersense,event", "model": "small"}
-
     booknlp = BookNLP("en", model_params)
 
     result = booknlp.process(text=text, doc_id="test")
