@@ -354,7 +354,7 @@ export class EntityTagger {
       const chunkIdx = chunkWordpieceLengths.length - 1;
       if (chunkIdx < 150) {
         // Minimal sample placeholder
-        chunkWordpieceSamples.push({ chunkIdx, tokenCount: chunk.spaCyTokens.length });
+        chunkWordpieceSamples.push({ chunkIdx, tokenCount: chunk.length });
       }
 
       // Match Python: check if adding this chunk would exceed limit
