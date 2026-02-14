@@ -24,19 +24,6 @@ export function validateSpaCyContext(context: SpaCyContext): ValidationError[] {
     errors.push({ field: 'sentences', message: 'sentences array is empty' });
   }
 
-  if (context.tokens && context.sentences) {
-    const tokenCount = context.tokens.length;
-    for (let i = 0; i < context.sentences.length; i++) {
-      const sent = context.sentences[i];
-      if (sent.start < 0 || sent.end > tokenCount || sent.start >= sent.end) {
-        errors.push({
-          field: `sentences[${i}]`,
-          message: `invalid sentence bounds: start=${sent.start}, end=${sent.end}, expected 0-${tokenCount}`,
-        });
-      }
-    }
-  }
-
   if (context.tokens) {
     for (let i = 0; i < context.tokens.length; i++) {
       const tokenErrors = validateSpaCyToken(context.tokens[i], i);
