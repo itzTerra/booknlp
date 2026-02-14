@@ -54,6 +54,10 @@ export function validateSpaCyToken(token: SpaCyToken, index: number): Validation
     errors.push({ field: `${prefix}.pos`, message: 'pos must be a non-empty string' });
   }
 
+  if (typeof token.finePos !== 'string' || token.finePos.length === 0) {
+    errors.push({ field: `${prefix}.finePos`, message: 'finePos must be a non-empty string' });
+  }
+
   if (typeof token.lemma !== 'string' || token.lemma.length === 0) {
     errors.push({ field: `${prefix}.lemma`, message: 'lemma must be a non-empty string' });
   }
@@ -62,8 +66,20 @@ export function validateSpaCyToken(token: SpaCyToken, index: number): Validation
     errors.push({ field: `${prefix}.deprel`, message: 'deprel must be a non-empty string' });
   }
 
-  if (typeof token.dephead !== 'number') {
-    errors.push({ field: `${prefix}.dephead`, message: 'dephead must be a number' });
+  if (token.dephead !== null && typeof token.dephead !== 'number') {
+    errors.push({ field: `${prefix}.dephead`, message: 'dephead must be a number or null' });
+  }
+
+  if (typeof token.paragraphId !== 'number' || token.paragraphId < 0) {
+    errors.push({ field: `${prefix}.paragraphId`, message: 'paragraphId must be a non-negative number' });
+  }
+
+  if (typeof token.tokenId !== 'number' || token.tokenId < 0) {
+    errors.push({ field: `${prefix}.tokenId`, message: 'tokenId must be a non-negative number' });
+  }
+
+  if (token.ner !== null && typeof token.ner !== 'string') {
+    errors.push({ field: `${prefix}.ner`, message: 'ner must be a string or null' });
   }
 
   if (typeof token.sentenceId !== 'number' || token.sentenceId < 0) {
@@ -87,6 +103,18 @@ export function validateSpaCyToken(token: SpaCyToken, index: number): Validation
 
   if (typeof token.isStop !== 'boolean') {
     errors.push({ field: `${prefix}.isStop`, message: 'isStop must be a boolean' });
+  }
+
+  if (typeof token.itext !== 'string') {
+    errors.push({ field: `${prefix}.itext`, message: 'itext must be a string' });
+  }
+
+  if (typeof token.inQuote !== 'boolean') {
+    errors.push({ field: `${prefix}.inQuote`, message: 'inQuote must be a boolean' });
+  }
+
+  if (typeof token.event !== 'boolean') {
+    errors.push({ field: `${prefix}.event`, message: 'event must be a boolean' });
   }
 
   return errors;

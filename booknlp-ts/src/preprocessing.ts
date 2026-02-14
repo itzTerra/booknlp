@@ -218,7 +218,31 @@ export class Tokenizer {
     return 1 + wordTokens.length;  // [CAP] (1) + lowercase word tokens
   }
 
+  debugEncodeToken(text: string): { prepared: string; ids: number[]; tokens: string[] } {
+    this.ensureInitialized();
 
+    const firstChar = text[0];
+    const isCapitalized = firstChar && firstChar.toLowerCase() !== firstChar;
+
+    if (isCapitalized) {
+      // Match actual tokenizeTokens behavior: [CAP] token + word tokens
+      const lowercased = text.toLowerCase();
+      const wordTokens = this.wordpieceTokenize(lowercased);
+      const wordIds = this.tokensToIds(wordTokens);
+      // Use a stable vocab id for [CAP] (fallback to 30522)
+      const capId = this.vocab.get(SPECIAL_TOKENS.CAP) ?? 30522;
+      const ids = [capId, ...wordIds];
+      const prepared = `[CAP] ${lowercased}`;
+      return { prepared, ids, tokens: [SPECIAL_TOKENS.CAP, ...wordTokens] };
+    }
+
+    // Non-capitalized: encode as-is
+    const prepared = text;
+    const tokens = this.wordpieceTokenize(prepared);
+    const ids = this.tokensToIds(tokens);
+
+    return { prepared, ids, tokens };
+  }
 
   tokenize(spaCyContext: SpaCyContext): BertTokenizationResult {
     return this.tokenizeTokens(spaCyContext.tokens);
@@ -369,101 +393,19 @@ export class Tokenizer {
       return 0;
     }
 
-    // Deterministic count: count [CAP] specially and then wordpiece-tokenize
-    return this.countCapTokensSeparately(text);
-  }
-
-}
-
-
-export function convertSpaCyToTokens(
-  spaCyContext: SpaCyContext,
-  paragraphId: number = 0,
-): Token[] {
-  const tokens: Token[] = [];
-  let tokenId = 0;
-  let currentParagraphId = paragraphId;
-
-  const normalizeWhitespace = (text: string): string =>
-    text.replace(/ /g, 'S').replace(/[\n\r]/g, 'N').replace(/\t/g, 'T');
-
-  const isWhitespaceToken = (text: string): boolean => text.trim().length === 0;
-
-  const sentences = spaCyContext.sentences ?? [{ start: 0, end: spaCyContext.tokens.length }];
-  let skippedGlobal = 0;
-  let currentWhitespace = '';
-  let sentenceId = 0;
-
-  for (const sentence of sentences) {
-    let skippedInSentence = 0;
-    const skipsInSentence: number[] = [];
-    let curSkips = 0;
-
-    for (let i = sentence.start; i < sentence.end; i++) {
-      const tok = spaCyContext.tokens[i];
-      if (isWhitespaceToken(tok.text)) {
-        curSkips += 1;
-      }
-      skipsInSentence.push(curSkips);
-    }
-
-    let hasWord = false;
-
-    for (let i = sentence.start; i < sentence.end; i++) {
-      const spaCyToken = spaCyContext.tokens[i];
-
-      if (isWhitespaceToken(spaCyToken.text)) {
-        skippedGlobal += 1;
-        skippedInSentence += 1;
-        currentWhitespace += spaCyToken.text;
-        continue;
-      }
-
-      if (currentWhitespace.includes('\n\n')) {
-        currentParagraphId++;
-      }
-
-      hasWord = true;
-
-      const headInSentence = spaCyToken.dephead - sentence.start;
-      const headSkip =
-        headInSentence >= 0 && headInSentence < skipsInSentence.length
-          ? skipsInSentence[headInSentence]
-          : 0;
-      const tokenSkip = skipsInSentence[i - sentence.start] ?? 0;
-      const skipsBetweenTokenAndHead = headSkip - tokenSkip;
-      const dephead = spaCyToken.dephead - skippedGlobal - skipsBetweenTokenAndHead;
-
-      const normalizedText = normalizeWhitespace(spaCyToken.text);
-      const token: Token = {
-        paragraphId: currentParagraphId,
-        sentenceId,
-        withinSentenceId: i - sentence.start - skippedInSentence,
-        tokenId: tokenId++,
-        text: normalizedText,
-        pos: spaCyToken.pos,
-        finePos: spaCyToken.finePos,
-        lemma: spaCyToken.lemma,
-        deprel: spaCyToken.deprel,
-        dephead,
-        ner: null,
-        startByte: spaCyToken.startByte,
-        endByte: spaCyToken.endByte,
-        morph: spaCyToken.morph || {},
-        likeNum: spaCyToken.likeNum,
-        isStop: spaCyToken.isStop,
-        itext: normalizedText.toLowerCase(),
-        inQuote: false,
-        event: false,
-      };
-
-      tokens.push(token);
-      currentWhitespace = '';
-    }
-
-    if (hasWord) {
-      sentenceId += 1;
+    // Use the same deterministic encoder used by batching so counts match
+    // the actual tokenization output. This reduces mismatch risk between
+    // the Python tokenizer and this JS implementation.
+    try {
+      const enc = this.debugEncodeToken(text);
+      return enc.ids.length;
+    } catch (e) {
+      // Fallback: previous count logic
+      return this.countCapTokensSeparately(text);
     }
   }
-  return tokens;
 }
+// Note: conversion from raw spaCy token list into BookNLP `Token` objects
+// was previously handled by `convertSpaCyToTokens`. That conversion has been
+// removed: callers are expected to supply a `SpaCyContext` whose `tokens`
+// already conform to the BookNLP `Token` shape (see `types.ts`).

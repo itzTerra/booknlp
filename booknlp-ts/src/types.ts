@@ -1,18 +1,7 @@
-export interface SpaCyToken {
-  text: string;
-  startByte: number;
-  endByte: number;
-  pos: string;
-  finePos: string;
-  lemma: string;
-  deprel: string;
-  dephead: number;
-  morph: Record<string, string>;
-  likeNum: boolean;
-  isStop: boolean;
-  sentenceId: number;
-  withinSentenceId: number;
-}
+// SpaCyToken is unified with `Token` so the external spaCy-produced context
+// may include all BookNLP token fields. This removes the previous distinction
+// between a lightweight spaCy token and the BookNLP `Token` shape.
+export type SpaCyToken = Token;
 
 export interface CRFTransitions {
   entity_transitions: number[][];
