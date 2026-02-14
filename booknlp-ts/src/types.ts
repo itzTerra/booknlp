@@ -112,13 +112,14 @@ export interface Resources {
 }
 
 export interface BookNLPConfig {
-  modelPath?: string;
   // Pipeline tasks to run. Mirror Python's comma-separated string: "entity,supersense,event"
   // Each string should be one of: "entity", "supersense", "event"
-  pipeline: string | string[];
-  verbose?: boolean;
+  pipeline: ("entity" | "supersense" | "event")[];
+  // Optional cache name to use for browser Cache Storage and HF cache_dir
+  cacheName?: string;
+  modelPath?: string;
+  // Optional ONNX Runtime execution providers. If not specified, defaults to ['wasm'].
   executionProviders?: ExecutionProvider[];
-  wasmPaths?: string | Record<string, string>;
 }
 
 export interface BertTokenizationResult {
@@ -138,3 +139,6 @@ export interface ValidationError {
   field: string;
   message: string;
 }
+
+// progress: 0 to 1
+export type ProgressCallback = (progress: number) => void;

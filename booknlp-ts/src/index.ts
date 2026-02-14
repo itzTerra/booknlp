@@ -1,5 +1,7 @@
-import { SpaCyContext, BookNLPConfig, BookNLPResult } from './types';
+import { SpaCyContext, BookNLPConfig, BookNLPResult, ProgressCallback } from './types';
 import { EnglishBookNLP, createPipeline } from './english-booknlp';
+import { installGlobalFetch } from './cache-service';
+import { env } from '@huggingface/transformers';
 
 /**
  * BookNLP TypeScript implementation for browser environment.
@@ -22,7 +24,14 @@ import { EnglishBookNLP, createPipeline } from './english-booknlp';
 export class BookNLP {
   private pipeline: EnglishBookNLP | null = null;
 
-  async initialize(config: BookNLPConfig): Promise<void> {
+  async initialize(config: BookNLPConfig, progress?: ProgressCallback): Promise<void> {
+    // Install global cached fetch which will route all resource loads through
+    // the cache service and emit progress updates via the provided callback.
+    if (!config.cacheName) {
+      config.cacheName = 'booknlp-resources-v1';
+    }
+    env.cacheKey = config.cacheName;
+    installGlobalFetch(progress, config.cacheName);
     this.pipeline = await createPipeline(config);
   }
 
@@ -44,3 +53,4 @@ export * from './english-booknlp';
 export * from './crf-decoder';
 export * from './advanced-postprocessor';
 export * from './name-coref';
+export { installGlobalFetch, clearCache, hasCached } from './cache-service';

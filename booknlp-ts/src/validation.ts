@@ -109,20 +109,16 @@ export function validateBookNLPConfig(config: BookNLPConfig): ValidationError[] 
   const errors: ValidationError[] = [];
 
   const validTasks = ['entity', 'supersense', 'event'];
-  const rawPipeline = config.pipeline;
-  const pipelineItems = Array.isArray(rawPipeline)
-    ? rawPipeline
-    : rawPipeline.split(',').map((task) => task.trim()).filter(Boolean);
 
-  if (pipelineItems.length === 0) {
+  if (config.pipeline.length === 0) {
     errors.push({ field: 'pipeline', message: 'pipeline must be a non-empty string or array' });
   }
 
-  for (let i = 0; i < pipelineItems.length; i++) {
-    if (!validTasks.includes(pipelineItems[i])) {
+  for (let i = 0; i < config.pipeline.length; i++) {
+    if (!validTasks.includes(config.pipeline[i])) {
       errors.push({
         field: `pipeline[${i}]`,
-        message: `invalid pipeline task "${pipelineItems[i]}". Must be one of: ${validTasks.join(', ')}`,
+        message: `invalid pipeline task "${config.pipeline[i]}". Must be one of: ${validTasks.join(', ')}`,
       });
     }
   }
