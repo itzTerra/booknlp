@@ -281,6 +281,134 @@ export class EntityTagger {
         };
   }
 
+  async tag_batch(
+    texts: Token[][],
+  ): Promise<Array<{
+    entities?: EntityAnnotation[];
+    supersense?: SupersenseAnnotation[];
+    events?: Set<number>;
+  }>> {
+    if (!this.initialized) {
+      throw new Error('EntityTagger not initialized. Call initialize() first.');
+    }
+
+    const maxBatchSize = 32;
+
+    // We'll clone tokens and assign globally-unique tokenId offsets per text so
+    // inference outputs (which use tokenId) can be mapped back to their origin.
+    const clonedTexts: Token[][] = [];
+    const clonedIdToTextIndex = new Map<number, number>();
+    const clonedIdToOriginalId = new Map<number, number>();
+
+    let offset = 0;
+    for (let ti = 0; ti < texts.length; ti++) {
+      const tokens = texts[ti] || [];
+      // Keep original token indices so we can map back when tokenId is missing
+      const indexed = tokens.map((t, idx) => ({ t, idx }));
+      const filtered = indexed.filter(({ t }) => t.text && t.text.trim().length > 0);
+      if (filtered.length === 0) {
+        clonedTexts.push([]);
+        continue;
+      }
+
+      const base = offset;
+      const cloned = filtered.map(({ t, idx }, localIndex) => {
+        const originalId = typeof t.tokenId === 'number' ? t.tokenId : idx;
+        // Assign a unique cloned id per token using the running offset + local index
+        const copy: Token = { ...t, tokenId: base + localIndex };
+        clonedIdToTextIndex.set(copy.tokenId as number, ti);
+        // Map cloned id back to the original token index (or original tokenId if present)
+        clonedIdToOriginalId.set(copy.tokenId as number, originalId);
+        return copy;
+      });
+
+      clonedTexts.push(cloned);
+      // Advance offset by the number of tokens we added for this text to keep ranges unique
+      offset += filtered.length;
+    }
+
+    // Prepare empty results per input text
+    const results: Array<{ entities: EntityAnnotation[]; supersense: SupersenseAnnotation[]; events: Set<number> }> =
+      texts.map(() => ({ entities: [], supersense: [], events: new Set<number>() }));
+
+    // Build combined batches from cloned texts
+    const combinedBatches: Token[][] = [];
+    for (const cloned of clonedTexts) {
+      if (!cloned || cloned.length === 0) continue;
+      const { batches } = this.createSentenceBatches(cloned);
+      for (const b of batches) combinedBatches.push(b);
+    }
+
+    if (combinedBatches.length === 0) {
+      return results;
+    }
+
+    const sentenceLengths = combinedBatches.map((batch) => this.estimateSentenceLength(batch));
+    const orderedSentences = combinedBatches
+      .map((batch, index) => ({ batch, length: sentenceLengths[index], index }))
+      .sort((a, b) => a.length - b.length);
+
+    let batchIdx = 0;
+    let currentBatchSize = maxBatchSize;
+
+    while (batchIdx < orderedSentences.length) {
+      const batchSizeUsed = currentBatchSize;
+      const batchEnd = Math.min(batchIdx + batchSizeUsed, orderedSentences.length);
+      const batchSlice = orderedSentences.slice(batchIdx, batchEnd);
+      const batchMaxLen = Math.max(...batchSlice.map((item) => item.length));
+      const batchInputs = batchSlice.map((item) => item.batch);
+
+      const batchResults = await this.processSentenceBatch(batchInputs);
+
+      // Remap entities to their original text and original token ids
+      if (batchResults.entities) {
+        for (const ent of batchResults.entities) {
+          const clonedStart = ent.startToken as number;
+          const clonedEnd = ent.endToken as number;
+          const textIndex = clonedIdToTextIndex.get(clonedStart);
+          const origStart = clonedIdToOriginalId.get(clonedStart);
+          const origEnd = clonedIdToOriginalId.get(clonedEnd);
+          if (textIndex === undefined || origStart === undefined || origEnd === undefined) continue;
+          results[textIndex].entities.push({ ...ent, startToken: origStart, endToken: origEnd });
+        }
+      }
+
+      if (batchResults.supersense) {
+        for (const ss of batchResults.supersense) {
+          const clonedStart = ss[0] as number;
+          const clonedEnd = ss[1] as number;
+          const textIndex = clonedIdToTextIndex.get(clonedStart);
+          const origStart = clonedIdToOriginalId.get(clonedStart);
+          const origEnd = clonedIdToOriginalId.get(clonedEnd);
+          if (textIndex === undefined || origStart === undefined || origEnd === undefined) continue;
+          results[textIndex].supersense.push([origStart, origEnd, ss[2], ss[3]] as any);
+        }
+      }
+
+      if (batchResults.events) {
+        for (const tokenId of batchResults.events) {
+          const clonedId = tokenId as number;
+          const textIndex = clonedIdToTextIndex.get(clonedId);
+          const orig = clonedIdToOriginalId.get(clonedId);
+          if (textIndex === undefined || orig === undefined) continue;
+          results[textIndex].events.add(orig);
+        }
+      }
+
+      if (batchMaxLen > 200) {
+        currentBatchSize = 6;
+      } else if (batchMaxLen > 100) {
+        currentBatchSize = 12;
+      } else {
+        currentBatchSize = maxBatchSize;
+      }
+
+      batchIdx += batchSizeUsed;
+    }
+
+    return results;
+  }
+
   private createSentenceBatches(
     tokens: Token[],
   ): {

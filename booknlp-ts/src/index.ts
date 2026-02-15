@@ -40,6 +40,14 @@ export class BookNLP {
 
     return this.pipeline.process(spaCyContext);
   }
+
+  async process_batch(contexts: SpaCyContext[]): Promise<BookNLPResult[]> {
+    if (!this.pipeline) {
+      throw new Error('Pipeline not initialized. Call initialize() first.');
+    }
+
+    return this.pipeline.process_batch(contexts);
+  }
 }
 
 export * from './types';

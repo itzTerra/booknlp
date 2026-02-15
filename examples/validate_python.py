@@ -7,6 +7,7 @@ Processes test input using Python BookNLP and outputs results to JSON for compar
 import sys
 import json
 from typing import List, Sequence
+import argparse
 import spacy
 from pathlib import Path
 
@@ -124,8 +125,8 @@ def process_with_python_booknlp(text: str, output_file: str):
         ],
         "entities": result.entities,
         "supersense": result.supersense,
-        "timing": result.timing,
-        "_debug": result._debug,
+        "timing": getattr(result, "timing", None),
+        "_debug": getattr(result, "_debug", None),
     }
 
     # Record validation messages in the debug output instead of printing
@@ -146,11 +147,32 @@ def process_with_python_booknlp(text: str, output_file: str):
 
 
 if __name__ == "__main__":
-    input_file = Path(__file__).parent / "158_emma_cut.txt"
+    parser = argparse.ArgumentParser(
+        description="Validate Python BookNLP on sample text."
+    )
+    default_input = Path(__file__).parent / "158_emma_cut.txt"
+    parser.add_argument(
+        "-i",
+        "--input",
+        default=str(default_input),
+        help="Input text file path",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default="output/python_output.json",
+        help="Output JSON path",
+    )
 
+    args = parser.parse_args()
+
+    input_file = Path(args.input)
     with open(input_file, "r", encoding="utf-8") as f:
         test_text = f.read()
 
-    output_file = "output/python_output.json"
+    output_file = args.output
+    # Ensure output directory exists
+    out_dir = Path(output_file).parent
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     process_with_python_booknlp(test_text.strip(), output_file)

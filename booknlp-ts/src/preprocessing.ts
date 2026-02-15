@@ -1,5 +1,6 @@
 // import { AutoTokenizer, env } from '@huggingface/transformers';
 import { SpaCyContext, SpaCyToken, Token, BertTokenizationResult } from './types';
+import { env } from '@huggingface/transformers';
 
 const SPECIAL_TOKENS = {
   CLS: '[CLS]',
@@ -79,14 +80,114 @@ export class Tokenizer {
   }
 
   private async loadVocab(modelId: string): Promise<void> {
+    const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
     const vocabUrl = this.resolveVocabUrl(modelId);
-    const response = await fetch(vocabUrl);
+    const cacheName = (env && (env as any).cacheKey) ? (env as any).cacheKey : 'booknlp-resources-v1';
+
+    // Try Cache Storage first (use cacheName from config via env.cacheKey), with a meta entry for TTL.
+    try {
+      if (typeof caches !== 'undefined') {
+        const cache = await caches.open(cacheName);
+        const metaKey = `${vocabUrl}::meta`;
+        const metaResp = await cache.match(metaKey as any);
+        if (metaResp) {
+          try {
+            const meta = await metaResp.json();
+            if (meta && meta.timestamp && Date.now() - meta.timestamp < CACHE_TTL) {
+              const cachedResp = await cache.match(vocabUrl);
+              if (cachedResp && cachedResp.ok) {
+                const text = await cachedResp.text();
+                const tokens = text.split(/\r?\n/).filter(Boolean);
+                this.vocab = new Map();
+                tokens.forEach((token, index) => {
+                  if (token.length > 0) this.vocab.set(token, index);
+                });
+
+                const unkId = this.vocab.get('[UNK]');
+                const clsId = this.vocab.get('[CLS]');
+                const sepId = this.vocab.get('[SEP]');
+                if (unkId !== undefined) this.unkTokenId = unkId;
+                if (clsId !== undefined) this.clsTokenId = clsId;
+                if (sepId !== undefined) this.sepTokenId = sepId;
+                return;
+              }
+            }
+          } catch (e) {
+            // ignore meta parse errors and fall through to network fetch
+          }
+        }
+      }
+    } catch (e) {
+      // If Cache API is unavailable or fails, we'll fall back to network fetch below.
+    }
+
+    // Network fetch
+    let response: Response;
+    try {
+      response = await fetch(vocabUrl);
+    } catch (e) {
+      // If fetch fails, attempt to use any cached copy from Cache Storage (stale OK), but do NOT use localStorage.
+      try {
+        if (typeof caches !== 'undefined') {
+          const cache = await caches.open(cacheName);
+          const cachedResp = await cache.match(vocabUrl);
+          if (cachedResp && cachedResp.ok) {
+            const text = await cachedResp.text();
+            const tokens = text.split(/\r?\n/).filter(Boolean);
+            this.vocab = new Map();
+            tokens.forEach((token, index) => {
+              if (token.length > 0) this.vocab.set(token, index);
+            });
+
+            const unkId = this.vocab.get('[UNK]');
+            const clsId = this.vocab.get('[CLS]');
+            const sepId = this.vocab.get('[SEP]');
+            if (unkId !== undefined) this.unkTokenId = unkId;
+            if (clsId !== undefined) this.clsTokenId = clsId;
+            if (sepId !== undefined) this.sepTokenId = sepId;
+            return;
+          }
+        }
+      } catch (ce) {
+        // ignore cache errors
+      }
+
+      throw new Error(`Failed to fetch vocab.txt from ${vocabUrl}: ${e}`);
+    }
+
     if (!response.ok) {
+      // Server error; try stale cache from Cache Storage (do NOT use localStorage)
+      try {
+        if (typeof caches !== 'undefined') {
+          const cache = await caches.open(cacheName);
+          const cachedResp = await cache.match(vocabUrl);
+          if (cachedResp && cachedResp.ok) {
+            const text = await cachedResp.text();
+            const tokens = text.split(/\r?\n/).filter(Boolean);
+            this.vocab = new Map();
+            tokens.forEach((token, index) => {
+              if (token.length > 0) this.vocab.set(token, index);
+            });
+
+            const unkId = this.vocab.get('[UNK]');
+            const clsId = this.vocab.get('[CLS]');
+            const sepId = this.vocab.get('[SEP]');
+            if (unkId !== undefined) this.unkTokenId = unkId;
+            if (clsId !== undefined) this.clsTokenId = clsId;
+            if (sepId !== undefined) this.sepTokenId = sepId;
+            return;
+          }
+        }
+      } catch (ce) {
+        // ignore cache errors
+      }
+
       throw new Error(`Failed to load vocab.txt from ${vocabUrl}`);
     }
 
     const text = await response.text();
-    const tokens = text.split(/\r?\n/);
+    const tokens = text.split(/\r?\n/).filter(Boolean);
     this.vocab = new Map();
     tokens.forEach((token, index) => {
       if (token.length > 0) {
@@ -100,6 +201,18 @@ export class Tokenizer {
     if (unkId !== undefined) this.unkTokenId = unkId;
     if (clsId !== undefined) this.clsTokenId = clsId;
     if (sepId !== undefined) this.sepTokenId = sepId;
+
+    // Best-effort cache write: Cache Storage only
+    try {
+      if (typeof caches !== 'undefined') {
+        const cache = await caches.open(cacheName);
+        await cache.put(vocabUrl, new Response(text, { headers: { 'Content-Type': 'text/plain' } }));
+        const metaKey = `${vocabUrl}::meta`;
+        await cache.put(metaKey as any, new Response(JSON.stringify({ timestamp: Date.now() }), { headers: { 'Content-Type': 'application/json' } }));
+      }
+    } catch (e) {
+      // ignore cache write errors
+    }
   }
 
   private wordpieceTokenize(text: string): string[] {
