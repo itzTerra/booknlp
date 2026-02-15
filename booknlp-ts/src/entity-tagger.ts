@@ -1,4 +1,4 @@
-import { Token, EntityAnnotation, SupersenseAnnotation, Resources as Resources, ExecutionProvider, type ProgressCallback } from './types';
+import { Token, EntityAnnotation, SupersenseAnnotation, Resources as Resources, ExecutionProvider, type ProgressCallback, type DType } from './types';
 import { ONNXTaggerController } from './tagger-controller';
 import { Tokenizer } from './preprocessing';
 import { CRFDecoder } from './crf-decoder';
@@ -26,7 +26,7 @@ export class EntityTagger {
     resources: Resources,
     executionProviders: ExecutionProvider[] = ['wasm'],
     wasmPaths?: string | Record<string, string>,
-    dtype?: 'fp32' | 'fp16',
+    dtype?: DType,
   ) {
     this.controller = new ONNXTaggerController(modelPath, executionProviders, wasmPaths, dtype);
     this.advancedPostProcessor = new AdvancedPostProcessor();

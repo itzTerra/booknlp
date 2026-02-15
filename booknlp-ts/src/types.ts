@@ -99,6 +99,8 @@ export interface Resources {
   crfTransitions: CRFTransitions;
 }
 
+export type DType = 'fp32' | 'fp16' | 'q8';
+
 export interface BookNLPConfig {
   // Pipeline tasks to run. Mirror Python's comma-separated string: "entity,supersense,event"
   // Each string should be one of: "entity", "supersense", "event"
@@ -108,8 +110,8 @@ export interface BookNLPConfig {
   modelPath?: string;
   // Optional ONNX Runtime execution providers. If not specified, defaults to ['wasm'].
   executionProviders?: ExecutionProvider[];
-  // Optional numeric precision for model weights. Only 'fp32' and 'fp16' are supported.
-  dtype?: 'fp32' | 'fp16';
+  // Optional numeric precision for model weights. Only 'fp32', 'fp16', and 'q8' are supported.
+  dtype?: DType;
 }
 
 export interface BertTokenizationResult {
