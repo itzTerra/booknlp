@@ -124,6 +124,7 @@ export function validateBookNLPConfig(config: BookNLPConfig): ValidationError[] 
   const errors: ValidationError[] = [];
 
   const validTasks = ['entity', 'supersense', 'event'];
+  const validDtypes = ['fp32', 'fp16'];
 
   if (config.pipeline.length === 0) {
     errors.push({ field: 'pipeline', message: 'pipeline must be a non-empty string or array' });
@@ -134,6 +135,15 @@ export function validateBookNLPConfig(config: BookNLPConfig): ValidationError[] 
       errors.push({
         field: `pipeline[${i}]`,
         message: `invalid pipeline task "${config.pipeline[i]}". Must be one of: ${validTasks.join(', ')}`,
+      });
+    }
+  }
+
+  if (config.dtype !== undefined) {
+    if (!validDtypes.includes(config.dtype)) {
+      errors.push({
+        field: 'dtype',
+        message: `invalid dtype "${config.dtype}". Must be one of: ${validDtypes.join(', ')}`,
       });
     }
   }

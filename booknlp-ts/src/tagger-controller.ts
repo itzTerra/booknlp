@@ -5,6 +5,8 @@ import { PreTrainedModel } from '@huggingface/transformers';
 export interface InferenceConfig {
   executionProviders?: ExecutionProvider[];
   wasmPaths?: string | Record<string, string>;
+  // Optional numeric precision for model weights. Only 'fp32' and 'fp16' are supported.
+  dtype?: 'fp32' | 'fp16';
 }
 
 /**
@@ -41,15 +43,18 @@ export class ONNXTaggerController {
   private executionProviders: ExecutionProvider[];
   private modelPath: string;
   private wasmPaths?: string | Record<string, string>;
+  private dtype?: 'fp32' | 'fp16';
 
   constructor(
     modelPath: string,
     executionProviders: ExecutionProvider[] = ['wasm'],
     wasmPaths?: string | Record<string, string>,
+    dtype?: 'fp32' | 'fp16',
   ) {
     this.modelPath = modelPath;
     this.executionProviders = executionProviders;
     this.wasmPaths = wasmPaths;
+    this.dtype = dtype;
   }
 
   async loadModel(progressCallback?: ProgressCallback): Promise<void> {
@@ -61,7 +66,7 @@ export class ONNXTaggerController {
 
       this.onnxSession = (await PreTrainedModel.from_pretrained(this.modelPath, {
         subfolder: 'onnx',
-        dtype: "fp32",
+        dtype: this.dtype ?? 'fp16',
         session_options: {
           executionProviders: this.executionProviders
         },

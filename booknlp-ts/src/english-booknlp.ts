@@ -37,6 +37,7 @@ export class EnglishBookNLP {
       resources,
       executionProviders,
       config.cacheName,
+      config.dtype,
     );
   }
 

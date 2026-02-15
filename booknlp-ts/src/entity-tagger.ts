@@ -26,8 +26,9 @@ export class EntityTagger {
     resources: Resources,
     executionProviders: ExecutionProvider[] = ['wasm'],
     wasmPaths?: string | Record<string, string>,
+    dtype?: 'fp32' | 'fp16',
   ) {
-    this.controller = new ONNXTaggerController(modelPath, executionProviders, wasmPaths);
+    this.controller = new ONNXTaggerController(modelPath, executionProviders, wasmPaths, dtype);
     this.advancedPostProcessor = new AdvancedPostProcessor();
     this.crfDecoder = new CRFDecoder();
     this.resources = resources;
