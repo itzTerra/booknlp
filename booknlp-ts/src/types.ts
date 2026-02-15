@@ -108,6 +108,8 @@ export interface BookNLPConfig {
   modelPath?: string;
   // Optional ONNX Runtime execution providers. If not specified, defaults to ['wasm'].
   executionProviders?: ExecutionProvider[];
+  // Optional numeric precision for model weights. Only 'fp32' and 'fp16' are supported.
+  dtype?: 'fp32' | 'fp16';
 }
 
 export interface BertTokenizationResult {
