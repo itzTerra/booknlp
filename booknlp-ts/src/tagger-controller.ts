@@ -1,12 +1,12 @@
 import * as ort from 'onnxruntime-web';
-import { ExecutionProvider, type ProgressCallback } from './types';
+import { ExecutionProvider, type DType, type ProgressCallback } from './types';
 import { PreTrainedModel } from '@huggingface/transformers';
 
 export interface InferenceConfig {
   executionProviders?: ExecutionProvider[];
   wasmPaths?: string | Record<string, string>;
   // Optional numeric precision for model weights. Only 'fp32' and 'fp16' are supported.
-  dtype?: 'fp32' | 'fp16';
+  dtype?: DType;
 }
 
 /**
@@ -43,13 +43,13 @@ export class ONNXTaggerController {
   private executionProviders: ExecutionProvider[];
   private modelPath: string;
   private wasmPaths?: string | Record<string, string>;
-  private dtype?: 'fp32' | 'fp16';
+  private dtype?: DType;
 
   constructor(
     modelPath: string,
     executionProviders: ExecutionProvider[] = ['wasm'],
     wasmPaths?: string | Record<string, string>,
-    dtype?: 'fp32' | 'fp16',
+    dtype?: DType,
   ) {
     this.modelPath = modelPath;
     this.executionProviders = executionProviders;
@@ -66,7 +66,7 @@ export class ONNXTaggerController {
 
       this.onnxSession = (await PreTrainedModel.from_pretrained(this.modelPath, {
         subfolder: 'onnx',
-        dtype: this.dtype ?? 'fp16',
+        dtype: this.dtype ?? 'q8',
         session_options: {
           executionProviders: this.executionProviders
         },

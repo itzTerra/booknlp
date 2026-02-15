@@ -396,64 +396,64 @@ def main():
     all_match = True
 
     # Print validation/run messages collected by the validators
-    py_debug_root = py_data.get("_debug", {})
-    ts_debug_root = ts_data.get("_debug", {})
+    # py_debug_root = py_data.get("_debug", {})
+    # ts_debug_root = ts_data.get("_debug", {})
 
-    py_val_msgs = py_debug_root.get("validation_messages", [])
-    ts_val_msgs = ts_debug_root.get("validation_messages", [])
+    # py_val_msgs = py_debug_root.get("validation_messages", [])
+    # ts_val_msgs = ts_debug_root.get("validation_messages", [])
 
-    if py_val_msgs:
-        _print_and_log("\n--- Python validation messages ---", LOGFILE)
-        for m in py_val_msgs:
-            _print_and_log(f"  {m}", LOGFILE)
+    # if py_val_msgs:
+    #     _print_and_log("\n--- Python validation messages ---", LOGFILE)
+    #     for m in py_val_msgs:
+    #         _print_and_log(f"  {m}", LOGFILE)
 
-    if ts_val_msgs:
-        _print_and_log("\n--- TypeScript validation messages ---", LOGFILE)
-        for m in ts_val_msgs:
-            _print_and_log(f"  {m}", LOGFILE)
+    # if ts_val_msgs:
+    #     _print_and_log("\n--- TypeScript validation messages ---", LOGFILE)
+    #     for m in ts_val_msgs:
+    #         _print_and_log(f"  {m}", LOGFILE)
 
     # Print logger buffers / page console traces if available
-    py_logs = py_debug_root.get("logs") or []
-    if py_logs:
-        _print_and_log("\n--- Python collected logs ---", LOGFILE)
-        for entry in py_logs:
-            try:
-                _print_and_log(
-                    f"  {entry.get('level')} - {entry.get('message')}", LOGFILE
-                )
-            except Exception:
-                _print_and_log(f"  {entry}", LOGFILE)
+    # py_logs = py_debug_root.get("logs") or []
+    # if py_logs:
+    #     _print_and_log("\n--- Python collected logs ---", LOGFILE)
+    #     for entry in py_logs:
+    #         try:
+    #             _print_and_log(
+    #                 f"  {entry.get('level')} - {entry.get('message')}", LOGFILE
+    #             )
+    #         except Exception:
+    #             _print_and_log(f"  {entry}", LOGFILE)
 
-    ts_page_console = ts_debug_root.get("page_console", [])
-    if ts_page_console:
-        _print_and_log("\n--- TypeScript page console ---", LOGFILE)
-        # Condense repeated lines and truncate long entries
-        last = None
-        count = 0
+    # ts_page_console = ts_debug_root.get("page_console", [])
+    # if ts_page_console:
+    #     _print_and_log("\n--- TypeScript page console ---", LOGFILE)
+    #     # Condense repeated lines and truncate long entries
+    #     last = None
+    #     count = 0
 
-        def _emit_last():
-            nonlocal last, count
-            if last is None:
-                return
-            display = last if len(last) <= 300 else last[:300] + "... [truncated]"
-            if count == 1:
-                _print_and_log(f"  {display}", LOGFILE)
-            else:
-                _print_and_log(f"  {display}  (repeated {count} times)", LOGFILE)
-            last = None
-            count = 0
+    #     def _emit_last():
+    #         nonlocal last, count
+    #         if last is None:
+    #             return
+    #         display = last if len(last) <= 300 else last[:300] + "... [truncated]"
+    #         if count == 1:
+    #             _print_and_log(f"  {display}", LOGFILE)
+    #         else:
+    #             _print_and_log(f"  {display}  (repeated {count} times)", LOGFILE)
+    #         last = None
+    #         count = 0
 
-        for m in ts_page_console:
-            try:
-                if m == last:
-                    count += 1
-                else:
-                    _emit_last()
-                    last = m
-                    count = 1
-            except Exception:
-                continue
-        _emit_last()
+    #     for m in ts_page_console:
+    #         try:
+    #             if m == last:
+    #                 count += 1
+    #             else:
+    #                 _emit_last()
+    #                 last = m
+    #                 count = 1
+    #         except Exception:
+    #             continue
+    #     _emit_last()
 
     # If token-level data exists in both, do the full token/entity/supersense comparisons.
     py_has_tokens = "tokens" in py_data and isinstance(py_data.get("tokens"), list)

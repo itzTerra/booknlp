@@ -124,7 +124,7 @@ export function validateBookNLPConfig(config: BookNLPConfig): ValidationError[] 
   const errors: ValidationError[] = [];
 
   const validTasks = ['entity', 'supersense', 'event'];
-  const validDtypes = ['fp32', 'fp16'];
+  const validDtypes = ['fp32', 'fp16', 'q8'];
 
   if (config.pipeline.length === 0) {
     errors.push({ field: 'pipeline', message: 'pipeline must be a non-empty string or array' });

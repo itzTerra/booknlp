@@ -425,6 +425,52 @@ def export_fp16_onnx_with_optimum(onnx_model_path: Path) -> Optional[Path]:
     return model_path
 
 
+def export_q8_onnx(onnx_model_path: Path) -> Optional[Path]:
+    """
+    Export an INT8 (q8) quantized ONNX model using ONNX Runtime quantization.
+
+    This performs dynamic quantization of weights to QInt8 which is commonly
+    called "q8" in many toolchains. The output file is written alongside the
+    base model as `model_quantized.onnx`.
+
+    Args:
+        onnx_model_path: Path to the base ONNX model to quantize.
+
+    Returns:
+        Path to the quantized model if created, otherwise None.
+    """
+    if not onnx_model_path.exists():
+        print(f"Warning: Base ONNX model not found at {onnx_model_path}")
+        return None
+
+    try:
+        from onnxruntime.quantization import quantize_dynamic, QuantType
+    except Exception as exc:
+        print(f"Warning: onnxruntime.quantization not available: {exc}")
+        return None
+
+    save_dir = onnx_model_path.parent
+    out_path = save_dir / "model_quantized.onnx"
+
+    try:
+        # Quantize weights to QInt8 (8-bit quantization)
+        quantize_dynamic(
+            model_input=str(onnx_model_path),
+            model_output=str(out_path),
+            weight_type=QuantType.QInt8,
+        )
+    except Exception as exc:
+        print(f"Warning: Q8 quantization failed: {exc}")
+        return None
+
+    if not out_path.exists():
+        print("Warning: Q8 quantization did not produce model_quantized.onnx")
+        return None
+
+    print(f"✓ Q8 ONNX model exported to {out_path}")
+    return out_path
+
+
 def validate_onnx_model(
     tagger: Tagger,
     onnx_model_path: Path,
@@ -587,6 +633,7 @@ def validate_all_model_variants(
     model_variants = [
         ("model.onnx", "Base ONNX"),
         ("model_fp16.onnx", "FP16 ONNX"),
+        ("model_quantized.onnx", "Q8 ONNX"),
     ]
 
     all_passed = True
@@ -649,6 +696,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Export FP16 optimized ONNX model using Optimum",
     )
+    parser.add_argument(
+        "--export-q8",
+        action="store_true",
+        help="Export Q8 (INT8) quantized ONNX model using onnxruntime",
+    )
 
     args = parser.parse_args()
 
@@ -693,6 +745,10 @@ if __name__ == "__main__":
     if args.export_fp16:
         fp16_onnx_path = export_fp16_onnx_with_optimum(onnx_path)
 
+    q8_onnx_path = None
+    if args.export_q8:
+        q8_onnx_path = export_q8_onnx(onnx_path)
+
     if not args.skip_validation:
         validate_all_model_variants(
             tagger, Path(args.output_dir), skip_validation=False
@@ -705,3 +761,5 @@ if __name__ == "__main__":
     print(f"ONNX model: {onnx_path}")
     if fp16_onnx_path:
         print(f"FP16 ONNX model: {fp16_onnx_path}")
+    if q8_onnx_path:
+        print(f"Q8 ONNX model: {q8_onnx_path}")
