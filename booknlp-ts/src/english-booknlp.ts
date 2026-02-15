@@ -155,6 +155,99 @@ export class EnglishBookNLP {
       _debug: debugInfo,
     };
   }
+
+  async process_batch(spaCyContexts: SpaCyContext[]): Promise<BookNLPResult[]> {
+    this.ensureInitialized();
+
+    // Validate all contexts first
+    for (const ctx of spaCyContexts) {
+      const ctxErrors = validateSpaCyContext(ctx);
+      throwIfValidationErrors(ctxErrors);
+    }
+
+    const tokensLists: Token[][] = spaCyContexts.map((c) => (c.tokens as Token[]));
+
+    const taggerResults = await this.entityTagger.tag_batch(tokensLists);
+
+    const doEvent = this.config.pipeline.includes('event');
+    const doEntities = this.config.pipeline.includes('entity');
+    const doSS = this.config.pipeline.includes('supersense');
+
+    const results: BookNLPResult[] = [];
+
+    for (let i = 0; i < spaCyContexts.length; i++) {
+      const ctx = spaCyContexts[i];
+      const tokens = tokensLists[i];
+      const tr = taggerResults[i] || { entities: [], supersense: [], events: new Set<number>() };
+
+      if (doEvent && tr.events) {
+        tokens.forEach((token) => {
+          token.event = tr.events?.has(token.tokenId) ?? false;
+        });
+      }
+
+      let entities: BookNLPResult['entities'] = [];
+      if (doEntities && tr.entities) {
+        const fullLabelEntities = tr.entities.map((e) => ({
+          ...e,
+          fullLabel: `${e.prop}_${e.cat}`,
+        }));
+
+        entities = fullLabelEntities
+          .sort((a, b) => {
+            if (a.startToken !== b.startToken) return a.startToken - b.startToken;
+            if (a.endToken !== b.endToken) return a.endToken - b.endToken;
+            if (a.fullLabel !== b.fullLabel) return a.fullLabel.localeCompare(b.fullLabel);
+            return a.text.localeCompare(b.text);
+          })
+          .map(({ fullLabel, ...e }) => e);
+
+        const in_quotes: number[] = [];
+        for (const ent of entities) {
+          const start = ent.startToken;
+          const end = ent.endToken;
+          const startIn = tokens[start]?.inQuote ?? false;
+          const endIn = tokens[end]?.inQuote ?? false;
+          in_quotes.push(startIn || endIn ? 1 : 0);
+        }
+
+        const nameResolver = new NameCoref();
+        const tupleEntities: Array<[number, number, string, string]> = entities.map((e) => [
+          e.startToken,
+          e.endToken,
+          `${e.prop}_${e.cat}`,
+          e.text,
+        ]);
+
+        let refs: number[] = new Array(entities.length).fill(-1);
+        refs = nameResolver.cluster_narrator(tupleEntities, in_quotes, tokens);
+        refs = nameResolver.cluster_identical_propers(tupleEntities, refs);
+        refs = nameResolver.cluster_only_nouns(tupleEntities, refs, tokens);
+
+        entities = entities.map((e, idx) => ({
+          ...e,
+          coref: refs[idx],
+        }));
+      }
+
+      let supersense: any[] = [];
+      if (doSS && tr.supersense) {
+        supersense = tr.supersense;
+      }
+
+      const nounChunks = ctx.nounChunks || [];
+
+      results.push({
+        tokens,
+        sents: ctx.sentences,
+        nounChunks,
+        entities: entities,
+        supersense: supersense,
+      });
+    }
+
+    return results;
+  }
 }
 
 export async function createPipeline(config: BookNLPConfig, progressCallback?: ProgressCallback): Promise<EnglishBookNLP> {
