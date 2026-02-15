@@ -61,15 +61,6 @@ export class EnglishBookNLP {
     // (no conversion step). Use them directly as the pipeline tokens.
     this.tokens = spaCyContext.tokens as Token[];
 
-    const debugInfo: Record<string, any> = {
-      raw_tokens_count: this.tokens.length,
-      raw_tokens_sample: this.tokens.slice(0, 5).map(t => ({
-        text: t.text,
-        tokenId: t.tokenId,
-        sentenceId: t.sentenceId,
-      })),
-    };
-
     const taggerResults = await this.entityTagger.tag(this.tokens);
 
     // ignore any debug payloads from tagger
