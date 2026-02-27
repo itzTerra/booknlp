@@ -34,6 +34,7 @@ async function runValidation() {
         const config = {
             pipeline: ['entity', 'supersense', 'event'],
             wasmPaths: window.wasmPaths,
+            dtype: "fp32",
         };
 
         const booknlp = new BookNLP();
